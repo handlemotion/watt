@@ -9,7 +9,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "check-types": "tsc --noEmit",
@@ -19,7 +21,6 @@
     "@watt/agent": "workspace:*",
     "@watt/git": "workspace:*",
     "better-sqlite3": "^12.2.0",
-    "drizzle-orm": "^0.44.4",
     "ulid": "^3.0.1"
   },
   "devDependencies": {

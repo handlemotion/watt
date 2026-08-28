@@ -16,9 +16,31 @@ export type GitSpawn = (
 
 export type GitWorktree = {
   path: string;
+  pathExists: boolean;
   head: string;
   branch: string | null;
+  detached: boolean;
   bare: boolean;
+  locked: string | null;
+  prunable: string | null;
+};
+
+export type RepositorySnapshot = {
+  repositoryIdentity: string;
+  repoRoot: string;
+  inspectedAt: number;
+  worktrees: GitWorktree[];
+};
+
+export type RepositoryLeaseOwner = {
+  schemaVersion: 1;
+  leaseId: string;
+  repositoryIdentity: string;
+  operation: "create_worktree" | "archive_worktree";
+  pid: number;
+  hostname: string;
+  processStartFingerprint: string;
+  acquiredAt: number;
 };
 
 export type CreatedWorktree = {
@@ -52,12 +74,14 @@ export type WattJson = {
 
 export type GitService = {
   createWorktree: (input: CreateWorktreeInput) => Promise<CreatedWorktree>;
+  inspectRepository: (repoRoot: string) => Promise<RepositorySnapshot>;
   listWorktrees: (repoRoot: string) => Promise<GitWorktree[]>;
   archiveWorktree: (input: ArchiveWorktreeInput) => Promise<void>;
 };
 
 export type CreateGitOptions = {
   timeoutMs?: number;
+  leaseTimeoutMs?: number;
   concurrency?: number;
   spawn?: GitSpawn;
 };

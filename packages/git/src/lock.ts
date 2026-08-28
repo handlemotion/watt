@@ -16,6 +16,9 @@ export class RepoLock {
       return await task();
     } finally {
       release();
+      if (this.chains.get(repoRoot) === chained) {
+        this.chains.delete(repoRoot);
+      }
     }
   }
 }

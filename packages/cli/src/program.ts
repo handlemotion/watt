@@ -10,27 +10,35 @@ type GlobalOpts = {
   worktreeRoot?: string;
 };
 
-async function openHost(
+async function withHost<T>(
   opts: GlobalOpts,
   requireRepo: boolean,
-): Promise<{ host: Host; project?: Project }> {
+  registerRepo: boolean,
+  run: (host: Host, project?: Project) => Promise<T>,
+): Promise<T> {
+  if (requireRepo && !opts.repo) {
+    throw new Error("--repo is required");
+  }
   const worktreeRoot = path.resolve(
     opts.worktreeRoot ??
-      (opts.repo ? path.dirname(path.resolve(opts.repo)) : path.join(path.resolve(opts.stateDir), "worktrees")),
+      (opts.repo
+        ? path.dirname(path.resolve(opts.repo))
+        : path.join(path.resolve(opts.stateDir), "worktrees")),
   );
   const host = await createHost({
     stateDir: path.resolve(opts.stateDir),
     worktreeRoot,
     apiKey: process.env.CURSOR_API_KEY,
   });
-  if (!requireRepo) {
-    return { host };
+  try {
+    const project =
+      registerRepo && opts.repo
+        ? await host.projects.register(path.resolve(opts.repo))
+        : undefined;
+    return await run(host, project);
+  } finally {
+    await host.close();
   }
-  if (!opts.repo) {
-    throw new Error("--repo is required");
-  }
-  const project = await host.projects.register(path.resolve(opts.repo));
-  return { host, project };
 }
 
 export function createProgram(): Command {
@@ -39,7 +47,11 @@ export function createProgram(): Command {
     .name("watt")
     .description("Cursor-native worktree host")
     .option("--repo <path>", "git checkout to register")
-    .option("--state-dir <dir>", "sqlite state directory", path.join(homedir(), ".watt"))
+    .option(
+      "--state-dir <dir>",
+      "sqlite state directory",
+      path.join(homedir(), ".watt"),
+    )
     .option("--worktree-root <dir>", "directory for sibling worktrees");
 
   const worktree = program.command("worktree");
@@ -51,11 +63,8 @@ export function createProgram(): Command {
     .option("--base <ref>", "base ref")
     .action(async (flags: { slug: string; branch?: string; base?: string }) => {
       const opts = program.opts<GlobalOpts>();
-      const { host, project } = await openHost(opts, true);
-      if (!project) {
-        throw new Error("--repo is required");
-      }
-      try {
+      await withHost(opts, true, true, async (host, project) => {
+        if (!project) throw new Error("--repo is required");
         const workspace = await host.workspaces.create({
           projectId: project.id,
           slug: flags.slug,
@@ -63,23 +72,16 @@ export function createProgram(): Command {
           baseRef: flags.base,
         });
         process.stdout.write(`${JSON.stringify(workspace)}\n`);
-      } finally {
-        host.close();
-      }
+      });
     });
 
   worktree.command("ls").action(async () => {
     const opts = program.opts<GlobalOpts>();
-    const { host, project } = await openHost(opts, true);
-    if (!project) {
-      throw new Error("--repo is required");
-    }
-    try {
+    await withHost(opts, true, true, async (host, project) => {
+      if (!project) throw new Error("--repo is required");
       const rows = host.workspaces.list({ projectId: project.id });
       process.stdout.write(`${JSON.stringify(rows)}\n`);
-    } finally {
-      host.close();
-    }
+    });
   });
 
   worktree
@@ -87,13 +89,17 @@ export function createProgram(): Command {
     .requiredOption("--workspace <id>", "workspace id")
     .action(async (flags: { workspace: string }) => {
       const opts = program.opts<GlobalOpts>();
-      const { host } = await openHost(opts, Boolean(opts.repo));
-      try {
-        const workspace = await host.workspaces.archive({ workspaceId: flags.workspace });
-        process.stdout.write(`${JSON.stringify(workspace)}\n`);
-      } finally {
-        host.close();
-      }
+      await withHost(
+        opts,
+        Boolean(opts.repo),
+        Boolean(opts.repo),
+        async (host) => {
+          const workspace = await host.workspaces.archive({
+            workspaceId: flags.workspace,
+          });
+          process.stdout.write(`${JSON.stringify(workspace)}\n`);
+        },
+      );
     });
 
   program
@@ -102,22 +108,21 @@ export function createProgram(): Command {
     .requiredOption("--workspace <id>", "workspace id")
     .requiredOption("-p, --prompt <text>", "prompt")
     .option("--model <id>", "model id")
-    .action(async (flags: { workspace: string; prompt: string; model?: string }) => {
-      const opts = program.opts<GlobalOpts>();
-      const { host } = await openHost(opts, false);
-      try {
-        const { events } = await host.sessions.create({
-          workspaceId: flags.workspace,
-          prompt: flags.prompt,
-          model: flags.model,
+    .action(
+      async (flags: { workspace: string; prompt: string; model?: string }) => {
+        const opts = program.opts<GlobalOpts>();
+        await withHost(opts, false, false, async (host) => {
+          const { run } = await host.sessions.create({
+            workspaceId: flags.workspace,
+            prompt: flags.prompt,
+            model: flags.model,
+          });
+          for await (const event of host.runs.attach({ runId: run.id })) {
+            process.stdout.write(`${JSON.stringify(event)}\n`);
+          }
         });
-        for await (const event of events) {
-          process.stdout.write(`${JSON.stringify(event)}\n`);
-        }
-      } finally {
-        host.close();
-      }
-    });
+      },
+    );
 
   return program;
 }

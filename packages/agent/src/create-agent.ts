@@ -1,5 +1,5 @@
 import type { CursorRun } from "./types.js";
-import { assertAgentEvent, mapSdkMessage } from "./events.js";
+import { assertAgentEvent, mapUnknownSdkMessage } from "./events.js";
 import { mergeCustomTools } from "./tools.js";
 import {
   DEFAULT_SETTING_SOURCES,
@@ -19,15 +19,17 @@ export type CreateWattAgentOptions = {
 
 function wrapRun(run: CursorRun): WattRun {
   return {
+    cursorRunId: run.cursorRunId,
     async *stream() {
       try {
         for await (const message of run.stream()) {
-          for (const event of mapSdkMessage(message)) {
+          for (const event of mapUnknownSdkMessage(message)) {
             yield assertAgentEvent(event);
           }
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "agent stream failed";
+        const message =
+          error instanceof Error ? error.message : "agent stream failed";
         yield assertAgentEvent({ type: "error", message });
       } finally {
         try {
@@ -45,8 +47,8 @@ function wrapRun(run: CursorRun): WattRun {
 function bindHandle(handle: CursorAgentHandle): WattSessionHandle {
   return {
     cursorAgentId: handle.agentId,
-    async send(prompt: string) {
-      return wrapRun(await handle.send(prompt));
+    async send(prompt, sendOptions) {
+      return wrapRun(await handle.send(prompt, sendOptions));
     },
   };
 }
@@ -77,6 +79,9 @@ export function createAgent(options: CreateWattAgentOptions): WattAgent {
         settingSources: DEFAULT_SETTING_SOURCES,
       });
       return bindHandle(handle);
+    },
+    async getRun(input) {
+      return wrapRun(await runtime.getRun(input));
     },
   };
 }

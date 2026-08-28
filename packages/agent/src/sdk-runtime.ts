@@ -1,14 +1,16 @@
-import { Agent } from "@cursor/sdk";
 import type { SDKCustomTool } from "@cursor/sdk";
 
 import { parseSdkStreamMessage } from "./events.js";
 import type {
   CreateRuntimeInput,
   CursorAgentHandle,
+  CursorRun,
   CursorRuntime,
   CustomTool,
   ResumeRuntimeInput,
+  SendRunOptions,
   SettingSource,
+  WattRunResult,
 } from "./types.js";
 
 function toSdkCustomTools(tools: CustomTool[]): Record<string, SDKCustomTool> {
@@ -45,43 +47,80 @@ function localOptions(input: CreateRuntimeInput) {
   };
 }
 
+type SdkRunLike = {
+  id: string;
+  stream: () => AsyncIterable<unknown>;
+  wait: () => Promise<{
+    status: string;
+    result?: string;
+    error?: { message: string; code?: string };
+    durationMs?: number;
+  }>;
+  cancel: () => Promise<void>;
+};
+
+function mapRunResult(
+  result: Awaited<ReturnType<SdkRunLike["wait"]>>,
+): WattRunResult {
+  const status =
+    result.status === "finished" ||
+    result.status === "error" ||
+    result.status === "cancelled"
+      ? result.status
+      : "error";
+  const mapped: WattRunResult = { status };
+  if (typeof result.result === "string") mapped.result = result.result;
+  if (result.error) {
+    mapped.error = { message: result.error.message };
+    if (typeof result.error.code === "string") {
+      mapped.error.code = result.error.code;
+    }
+  }
+  if (typeof result.durationMs === "number") {
+    mapped.durationMs = result.durationMs;
+  }
+  return mapped;
+}
+
+function wrapSdkRun(run: SdkRunLike): CursorRun {
+  return {
+    cursorRunId: run.id,
+    async *stream() {
+      for await (const event of run.stream()) {
+        const mapped = parseSdkStreamMessage(event);
+        if (mapped) yield mapped;
+      }
+    },
+    async wait() {
+      return mapRunResult(await run.wait());
+    },
+    cancel: () => run.cancel(),
+  };
+}
+
 function wrapSdkAgent(agent: {
   agentId: string;
-  send: (prompt: string) => Promise<{
-    stream: () => AsyncIterable<unknown>;
-    wait: () => Promise<{ status: string }>;
-    cancel: () => Promise<void>;
-  }>;
+  send: (prompt: string, options?: SendRunOptions) => Promise<SdkRunLike>;
 }): CursorAgentHandle {
   return {
     agentId: agent.agentId,
-    async send(prompt: string) {
-      const run = await agent.send(prompt);
-      return {
-        async *stream() {
-          for await (const event of run.stream()) {
-            const mapped = parseSdkStreamMessage(event);
-            if (mapped) {
-              yield mapped;
-            }
-          }
-        },
-        async wait() {
-          const result = await run.wait();
-          if (result.status === "finished" || result.status === "error" || result.status === "cancelled") {
-            return { status: result.status };
-          }
-          return { status: "error" };
-        },
-        cancel: () => run.cancel(),
-      };
+    async send(prompt, options) {
+      return wrapSdkRun(await agent.send(prompt, options));
     },
   };
+}
+
+let sdkPromise: Promise<typeof import("@cursor/sdk")> | undefined;
+
+function loadSdk(): Promise<typeof import("@cursor/sdk")> {
+  sdkPromise ??= import("@cursor/sdk");
+  return sdkPromise;
 }
 
 export function createSdkRuntime(): CursorRuntime {
   return {
     async create(input: CreateRuntimeInput) {
+      const { Agent } = await loadSdk();
       const agent = await Agent.create({
         apiKey: input.apiKey,
         model: { id: input.model },
@@ -90,12 +129,21 @@ export function createSdkRuntime(): CursorRuntime {
       return wrapSdkAgent(agent);
     },
     async resume(input: ResumeRuntimeInput) {
+      const { Agent } = await loadSdk();
       const agent = await Agent.resume(input.agentId, {
         apiKey: input.apiKey,
         model: { id: input.model },
         local: localOptions(input),
       });
       return wrapSdkAgent(agent);
+    },
+    async getRun(input) {
+      const { Agent } = await loadSdk();
+      const run = await Agent.getRun(input.cursorRunId, {
+        runtime: "local",
+        cwd: input.cwd,
+      });
+      return wrapSdkRun(run);
     },
   };
 }
