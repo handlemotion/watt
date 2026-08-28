@@ -13,7 +13,7 @@ This file is the source of truth. Packages must match it.
 
 ## Non-goals (v0)
 
-- Product workspace UI, Electron, automatic updates, or desktop platforms other than Apple Silicon macOS. A minimal Tauri 2 packaging shell is allowed only to distribute and prove the local Host lifecycle.
+- Product workspace UI, Electron, automatic updates, or desktop platforms other than Apple Silicon macOS. v0's product surface remains libraries + CLI; its minimal Tauri 2 executable is distribution infrastructure allowed only to package the local Host and prove its lifecycle.
 - HTTP, WebSocket, ACP, or any alternate Host backend.
 - GitHub stacks (`gh stack`), nested worktrees, unarchive.
 - Cloud agents, ACP, Debug mode, Ask mode.
@@ -294,7 +294,7 @@ The desktop boundary is a headless child process over stdin/stdout. It exposes t
 
 ### Desktop packaging shell
 
-The `apps/desktop` Tauri 2 application is named Watt with identifier `com.handlemotion.watt`. It is distribution infrastructure, not product UI.
+The `apps/desktop` Tauri 2 application is named Watt with identifier `com.handlemotion.watt`. It is a supporting distribution artifact, not part of the v0 product surface, and exposes no workspace controls.
 
 - The Rust bridge remains the only desktop boundary. Frontend code receives only a readiness state and safe message; it has no shell capability and does not import Watt packages.
 - `@yao-pkg/pkg` packages the Node Host as the Tauri sidecar `watt-desktop-sidecar-aarch64-apple-darwin`. Its version is pinned and its executable must complete the real protocol handshake in temporary directories before packaging.

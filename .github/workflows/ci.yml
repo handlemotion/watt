@@ -58,9 +58,8 @@ jobs:
       - name: Run Rust checks
         run: pnpm check:rust
 
-      - name: Package and exercise sidecar
+      - name: Exercise packaged sidecar
         run: |
-          pnpm desktop:sidecar
           file apps/desktop/src-tauri/binaries/watt-desktop-sidecar-aarch64-apple-darwin | grep 'arm64'
           pnpm desktop:sidecar:smoke
 

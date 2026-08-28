@@ -88,6 +88,15 @@ async fn set_startup_error(runtime: &DesktopRuntime) {
     *runtime.status.write().await = DesktopStatus::error();
 }
 
+async fn set_ready_if_starting(runtime: &DesktopRuntime) -> bool {
+    let mut status = runtime.status.write().await;
+    if status.state != DesktopState::Starting {
+        return false;
+    }
+    *status = DesktopStatus::ready();
+    true
+}
+
 async fn completes_within<F>(duration: Duration, future: F) -> bool
 where
     F: Future<Output = ()>,
@@ -172,7 +181,10 @@ async fn start_sidecar(app: AppHandle, runtime: Arc<DesktopRuntime>) -> Result<(
     .map_err(|error| error.to_string())?;
 
     *runtime.client.lock().await = Some(client);
-    *runtime.status.write().await = DesktopStatus::ready();
+    if !set_ready_if_starting(&runtime).await {
+        runtime.client.lock().await.take();
+        return Err("sidecar exited during startup".into());
+    }
     Ok(())
 }
 
@@ -257,11 +269,20 @@ mod tests {
     async fn startup_error_is_safe_and_stable() {
         let runtime = DesktopRuntime::new();
         set_startup_error(&runtime).await;
+        assert!(!set_ready_if_starting(&runtime).await);
         assert_eq!(*runtime.status.read().await, DesktopStatus::error());
         assert_eq!(
             runtime.status.read().await.message,
             "Local host unavailable"
         );
+    }
+
+    #[tokio::test]
+    async fn termination_after_readiness_replaces_ready_with_error() {
+        let runtime = DesktopRuntime::new();
+        assert!(set_ready_if_starting(&runtime).await);
+        set_startup_error(&runtime).await;
+        assert_eq!(*runtime.status.read().await, DesktopStatus::error());
     }
 
     #[tokio::test]
