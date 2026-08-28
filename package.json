@@ -1,5 +1,6 @@
 {
   "name": "watt",
+  "version": "0.0.1",
   "private": true,
   "scripts": {
     "build": "turbo run build",
@@ -9,10 +10,22 @@
     "check-types": "turbo run check-types",
     "protocol:check": "pnpm --filter @watt/desktop-sidecar protocol:check",
     "test:rust": "cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml",
+    "format:check": "prettier --check . --ignore-unknown",
+    "check": "pnpm format:check && pnpm check-types && pnpm protocol:check && pnpm test && pnpm build",
+    "check:rust": "cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && pnpm test:rust",
+    "desktop:sidecar": "pnpm build && node scripts/build-desktop-sidecar.mjs",
+    "desktop:sidecar:smoke": "node scripts/smoke-desktop-sidecar.mjs",
+    "desktop:build": "pnpm desktop:sidecar && cd apps/desktop && ../../node_modules/.bin/tauri build",
+    "release:check": "node scripts/check-release-version.mjs",
     "benchmark:startup": "node scripts/benchmark-startup.mjs",
-    "format": "prettier --write \"**/*.{ts,md}\""
+    "format": "prettier --write . --ignore-unknown"
   },
   "devDependencies": {
+    "@cursor/sdk": "1.0.29",
+    "@tauri-apps/cli": "2.11.4",
+    "@yao-pkg/pkg": "6.22.0",
+    "better-sqlite3": "^12.2.0",
+    "esbuild": "0.28.2",
     "prettier": "3.9.6",
     "turbo": "^2.10.12",
     "typescript": "5.9.2",

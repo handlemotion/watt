@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
   "bin": {
     "watt-desktop-sidecar": "./dist/cli.js"
   },
@@ -16,6 +17,11 @@
     "dist",
     "protocol.schema.json"
   ],
+  "pkg": {
+    "assets": [
+      "protocol.schema.json"
+    ]
+  },
   "scripts": {
     "build": "tsc",
     "check-types": "tsc --noEmit",

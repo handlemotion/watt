@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 
@@ -14,9 +16,13 @@ import {
 
 type JsonObject = Record<string, unknown>;
 
-const schema = JSON.parse(
-  readFileSync(new URL("../protocol.schema.json", import.meta.url), "utf8"),
-) as JsonObject;
+declare const __dirname: string;
+declare const __WATT_PKG__: boolean;
+const schemaPath =
+  typeof __WATT_PKG__ !== "undefined" && __WATT_PKG__
+    ? path.join(__dirname, "protocol.schema.json")
+    : fileURLToPath(new URL("../protocol.schema.json", import.meta.url));
+const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as JsonObject;
 const schemaId = schema.$id;
 if (typeof schemaId !== "string") throw new Error("protocol schema has no $id");
 const requestDefinition = (schema.$defs as JsonObject | undefined)
