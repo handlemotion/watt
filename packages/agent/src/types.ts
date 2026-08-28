@@ -5,7 +5,13 @@ export type SettingSource = (typeof DEFAULT_SETTING_SOURCES)[number];
 export type AgentEvent =
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; callId: string; name: string; args: unknown }
-  | { type: "tool_result"; callId: string; name: string; result: unknown; ok: boolean }
+  | {
+      type: "tool_result";
+      callId: string;
+      name: string;
+      result: unknown;
+      ok: boolean;
+    }
   | { type: "status"; status: string; message?: string }
   | { type: "error"; message: string };
 
@@ -27,7 +33,12 @@ export type CustomTool = {
 export type SdkStreamMessage =
   | {
       type: "assistant";
-      message: { content: Array<{ type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: unknown }> };
+      message: {
+        content: Array<
+          | { type: "text"; text: string }
+          | { type: "tool_use"; id: string; name: string; input: unknown }
+        >;
+      };
     }
   | {
       type: "tool_call";
@@ -46,14 +57,17 @@ export type SdkStreamMessage =
   | { type: "usage" };
 
 export type CursorRun = {
-  stream: () => AsyncIterable<SdkStreamMessage>;
-  wait: () => Promise<{ status: "finished" | "error" | "cancelled" }>;
+  cursorRunId: string;
+  stream: () => AsyncIterable<unknown>;
+  wait: () => Promise<WattRunResult>;
   cancel: () => Promise<void>;
 };
 
+export type SendRunOptions = { idempotencyKey?: string };
+
 export type CursorAgentHandle = {
   agentId: string;
-  send: (prompt: string) => Promise<CursorRun>;
+  send: (prompt: string, options?: SendRunOptions) => Promise<CursorRun>;
 };
 
 export type CreateRuntimeInput = {
@@ -70,6 +84,7 @@ export type ResumeRuntimeInput = CreateRuntimeInput & { agentId: string };
 export type CursorRuntime = {
   create: (input: CreateRuntimeInput) => Promise<CursorAgentHandle>;
   resume: (input: ResumeRuntimeInput) => Promise<CursorAgentHandle>;
+  getRun: (input: { cursorRunId: string; cwd: string }) => Promise<CursorRun>;
 };
 
 export type CreateAgentInput = {
@@ -82,18 +97,29 @@ export type CreateAgentInput = {
 
 export type ResumeAgentInput = CreateAgentInput & { cursorAgentId: string };
 
+export type WattRunError = { message: string; code?: string };
+
+export type WattRunResult = {
+  status: "finished" | "error" | "cancelled";
+  result?: string;
+  error?: WattRunError;
+  durationMs?: number;
+};
+
 export type WattRun = {
+  cursorRunId: string;
   stream: () => AsyncIterable<AgentEvent>;
-  wait: () => Promise<{ status: "finished" | "error" | "cancelled" }>;
+  wait: () => Promise<WattRunResult>;
   cancel: () => Promise<void>;
 };
 
 export type WattSessionHandle = {
   cursorAgentId: string;
-  send: (prompt: string) => Promise<WattRun>;
+  send: (prompt: string, options?: SendRunOptions) => Promise<WattRun>;
 };
 
 export type WattAgent = {
   create: (input: CreateAgentInput) => Promise<WattSessionHandle>;
   resume: (input: ResumeAgentInput) => Promise<WattSessionHandle>;
+  getRun: (input: { cursorRunId: string; cwd: string }) => Promise<WattRun>;
 };

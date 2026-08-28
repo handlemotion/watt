@@ -17,13 +17,61 @@ export function parseSdkStreamMessage(value: unknown): SdkStreamMessage | null {
     return null;
   }
   const type = (value as { type: unknown }).type;
-  if (typeof type !== "string" || !SDK_TYPES.has(type as SdkStreamMessage["type"])) {
+  if (
+    typeof type !== "string" ||
+    !SDK_TYPES.has(type as SdkStreamMessage["type"])
+  ) {
     return null;
   }
-  return value as SdkStreamMessage;
+  const record = value as Record<string, unknown>;
+  switch (type) {
+    case "assistant":
+      return isRecord(record.message) && Array.isArray(record.message.content)
+        ? (value as SdkStreamMessage)
+        : null;
+    case "tool_call":
+      return typeof record.call_id === "string" &&
+        typeof record.name === "string" &&
+        (record.status === "running" ||
+          record.status === "completed" ||
+          record.status === "error")
+        ? (value as SdkStreamMessage)
+        : null;
+    case "status":
+      return typeof record.status === "string" &&
+        (record.message === undefined || typeof record.message === "string")
+        ? (value as SdkStreamMessage)
+        : null;
+    case "task":
+      return (record.status === undefined ||
+        typeof record.status === "string") &&
+        (record.text === undefined || typeof record.text === "string")
+        ? (value as SdkStreamMessage)
+        : null;
+    case "thinking":
+      return typeof record.text === "string"
+        ? (value as SdkStreamMessage)
+        : null;
+    case "request":
+      return typeof record.request_id === "string"
+        ? (value as SdkStreamMessage)
+        : null;
+    case "system":
+    case "user":
+    case "usage":
+      return value as SdkStreamMessage;
+    default:
+      return null;
+  }
 }
 
-function textFromAssistant(message: Extract<SdkStreamMessage, { type: "assistant" }>): string {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function textFromAssistant(
+  message: Extract<SdkStreamMessage, { type: "assistant" }>,
+): string {
   const content = message.message?.content;
   if (!Array.isArray(content)) {
     return "";
@@ -71,9 +119,17 @@ export function mapSdkMessage(message: SdkStreamMessage): AgentEvent[] {
       ];
     }
     case "status":
-      return [{ type: "status", status: message.status, message: message.message }];
+      return [
+        { type: "status", status: message.status, message: message.message },
+      ];
     case "task":
-      return [{ type: "status", status: message.status ?? "task", message: message.text }];
+      return [
+        {
+          type: "status",
+          status: message.status ?? "task",
+          message: message.text,
+        },
+      ];
     case "system":
     case "user":
     case "thinking":
@@ -85,6 +141,11 @@ export function mapSdkMessage(message: SdkStreamMessage): AgentEvent[] {
       return exhaustive;
     }
   }
+}
+
+export function mapUnknownSdkMessage(value: unknown): AgentEvent[] {
+  const message = parseSdkStreamMessage(value);
+  return message ? mapSdkMessage(message) : [];
 }
 
 export function assertAgentEvent(event: AgentEvent): AgentEvent {

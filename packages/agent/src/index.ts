@@ -8,8 +8,11 @@ export type {
   CursorRuntime,
   CustomTool,
   ResumeAgentInput,
+  SendRunOptions,
   WattAgent,
   WattRun,
+  WattRunError,
+  WattRunResult,
   WattSessionHandle,
   WorkspaceInfo,
 } from "./types.js";

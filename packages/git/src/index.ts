@@ -10,5 +10,7 @@ export type {
   GitSpawn,
   GitSpawnResult,
   GitWorktree,
+  RepositoryLeaseOwner,
+  RepositorySnapshot,
   WattJson,
 } from "./types.js";

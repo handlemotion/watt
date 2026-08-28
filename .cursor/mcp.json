@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "figma": {
+      "url": "https://mcp.figma.com/mcp"
+    },
+    "exa": {
+      "url": "https://mcp.exa.ai/mcp"
+    },
+    "cloudflare-api": {
+      "url": "https://mcp.cloudflare.com/mcp"
+    },
+    "planetscale": {
+      "url": "https://mcp.pscale.dev/mcp/planetscale"
+    }
+  }
+}
