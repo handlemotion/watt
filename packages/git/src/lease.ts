@@ -35,7 +35,10 @@ function isOwner(value: unknown): value is RepositoryLeaseOwner {
     typeof candidate.leaseId === "string" &&
     typeof candidate.repositoryIdentity === "string" &&
     (candidate.operation === "create_worktree" ||
-      candidate.operation === "archive_worktree") &&
+      candidate.operation === "archive_worktree" ||
+      candidate.operation === "recover_workspace_operation") &&
+    (candidate.operationId === undefined ||
+      typeof candidate.operationId === "string") &&
     typeof candidate.pid === "number" &&
     Number.isInteger(candidate.pid) &&
     candidate.pid > 0 &&
@@ -122,6 +125,7 @@ export class RepositoryLease {
     repositoryIdentity: string,
     operation: RepositoryLeaseOwner["operation"],
     task: () => Promise<T>,
+    operationId?: string,
   ): Promise<T> {
     const root = path.join(repositoryIdentity, "watt-locks");
     const owners = path.join(root, "owners");
@@ -148,6 +152,7 @@ export class RepositoryLease {
       processStartFingerprint,
       acquiredAt: Date.now(),
     };
+    if (operationId !== undefined) owner.operationId = operationId;
     await writeFile(temporaryOwnerPath, `${JSON.stringify(owner)}\n`, {
       flag: "wx",
       mode: 0o600,

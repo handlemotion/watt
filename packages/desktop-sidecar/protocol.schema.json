@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://watt.dev/schemas/desktop-sidecar-v1.json",
+  "title": "Watt desktop sidecar protocol v1",
+  "$defs": {
+    "Ulid": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "Capability": {
+      "enum": [
+        "host.projects.v1",
+        "host.workspaces.v1",
+        "host.sessions.v1",
+        "host.runs.v1",
+        "run-stream.v1",
+        "graceful-shutdown.v1"
+      ]
+    },
+    "HostOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stateDir", "worktreeRoot"],
+      "properties": {
+        "stateDir": { "type": "string", "minLength": 1 },
+        "worktreeRoot": { "type": "string", "minLength": 1 },
+        "leaseTimeoutMs": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "HelloEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "protocolVersionMin",
+        "protocolVersionMax",
+        "capabilities",
+        "host"
+      ],
+      "properties": {
+        "type": { "const": "hello" },
+        "protocolVersionMin": { "type": "integer", "minimum": 1 },
+        "protocolVersionMax": { "type": "integer", "minimum": 1 },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Capability" },
+          "uniqueItems": true
+        },
+        "host": { "$ref": "#/$defs/HostOptions" }
+      }
+    },
+    "RequestEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "requestId", "method", "params"],
+      "properties": {
+        "type": { "const": "request" },
+        "version": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/Ulid" },
+        "method": {
+          "enum": [
+            "projects.register",
+            "projects.get",
+            "projects.list",
+            "projects.reconcile",
+            "workspaces.create",
+            "workspaces.get",
+            "workspaces.list",
+            "workspaces.archive",
+            "sessions.create",
+            "sessions.get",
+            "sessions.list",
+            "sessions.send",
+            "runs.get",
+            "runs.list",
+            "runs.wait",
+            "runs.cancel",
+            "runs.attach",
+            "runs.unsubscribe",
+            "host.capabilities",
+            "diagnostics.operations.get",
+            "diagnostics.operations.list",
+            "host.close"
+          ]
+        },
+        "params": { "type": "object" }
+      }
+    },
+    "ClientEnvelope": {
+      "oneOf": [
+        { "$ref": "#/$defs/HelloEnvelope" },
+        { "$ref": "#/$defs/RequestEnvelope" }
+      ]
+    },
+    "HelloAckEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "capabilities"],
+      "properties": {
+        "type": { "const": "hello_ack" },
+        "version": { "const": 1 },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Capability" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "ResultEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "requestId", "result"],
+      "properties": {
+        "type": { "const": "result" },
+        "version": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/Ulid" },
+        "result": true
+      }
+    },
+    "WireError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "details": { "type": "object" }
+      }
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "fatal", "error"],
+      "properties": {
+        "type": { "const": "error" },
+        "version": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/Ulid" },
+        "fatal": { "type": "boolean" },
+        "error": { "$ref": "#/$defs/WireError" },
+        "supportedVersions": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "uniqueItems": true
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Capability" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "RunEventEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "subscriptionId", "runId", "event"],
+      "properties": {
+        "type": { "const": "run_event" },
+        "version": { "const": 1 },
+        "subscriptionId": { "$ref": "#/$defs/Ulid" },
+        "runId": { "$ref": "#/$defs/Ulid" },
+        "event": {
+          "type": "object",
+          "required": ["type", "workspaceId", "sessionId", "runId", "sequence"],
+          "properties": {
+            "type": { "type": "string", "minLength": 1 },
+            "workspaceId": { "$ref": "#/$defs/Ulid" },
+            "sessionId": { "$ref": "#/$defs/Ulid" },
+            "runId": { "$ref": "#/$defs/Ulid" },
+            "sequence": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "StreamEndEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "subscriptionId", "runId", "reason"],
+      "properties": {
+        "type": { "const": "stream_end" },
+        "version": { "const": 1 },
+        "subscriptionId": { "$ref": "#/$defs/Ulid" },
+        "runId": { "$ref": "#/$defs/Ulid" },
+        "reason": {
+          "enum": [
+            "finished",
+            "error",
+            "cancelled",
+            "unsubscribed",
+            "shutdown",
+            "consumer_too_slow",
+            "protocol_error",
+            "sidecar_disconnected"
+          ]
+        },
+        "result": { "type": "object" },
+        "error": { "$ref": "#/$defs/WireError" }
+      }
+    },
+    "ServerEnvelope": {
+      "oneOf": [
+        { "$ref": "#/$defs/HelloAckEnvelope" },
+        { "$ref": "#/$defs/ResultEnvelope" },
+        { "$ref": "#/$defs/ErrorEnvelope" },
+        { "$ref": "#/$defs/RunEventEnvelope" },
+        { "$ref": "#/$defs/StreamEndEnvelope" }
+      ]
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/ClientEnvelope" },
+    { "$ref": "#/$defs/ServerEnvelope" }
+  ]
+}

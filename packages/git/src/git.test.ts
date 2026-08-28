@@ -396,4 +396,218 @@ describe("createGit", () => {
     });
     await access(path.join(worktreePath, "cursor-setup-ran"));
   });
+
+  it("creates an operation-marked worktree idempotently", async () => {
+    const { repo, parent } = await initRepo();
+    temps.push(parent);
+    const git = createGit();
+    const worktreePath = path.join(parent, "journal-create");
+    const input = {
+      operationId: "01H00000000000000000000000",
+      type: "create_workspace" as const,
+      target: "git_worktree_created" as const,
+      repoRoot: repo,
+      worktreePath,
+      slug: "journal-create",
+      branch: "watt/journal-create",
+      baseRef: "HEAD",
+    };
+
+    const first = await git.advanceWorkspaceOperation(input);
+    const repeated = await git.advanceWorkspaceOperation(input);
+
+    expect(first).toMatchObject({
+      state: "advanced",
+      expectedHead: expect.any(String),
+    });
+    expect(repeated).toEqual(first);
+    expect(
+      (await git.listWorktrees(repo)).filter(
+        (worktree) => worktree.branch === "watt/journal-create",
+      ),
+    ).toHaveLength(1);
+    await access(
+      path.join(repo, ".git", "watt-operations", `${input.operationId}.json`),
+    );
+  });
+
+  it("does not delete a branch that changed after worktree removal", async () => {
+    const { repo, parent } = await initRepo();
+    temps.push(parent);
+    const git = createGit();
+    const worktreePath = path.join(parent, "journal-archive");
+    await git.createWorktree({
+      repoRoot: repo,
+      worktreePath,
+      slug: "journal-archive",
+      branch: "watt/journal-archive",
+      baseRef: "HEAD",
+    });
+    const common = {
+      operationId: "01H00000000000000000000001",
+      type: "archive_workspace" as const,
+      repoRoot: repo,
+      worktreePath,
+      branch: "watt/journal-archive",
+      keepBranch: false,
+    };
+    await expect(
+      git.advanceWorkspaceOperation({
+        ...common,
+        target: "git_worktree_removed",
+      }),
+    ).resolves.toMatchObject({ state: "advanced" });
+
+    await writeFile(path.join(repo, "changed.txt"), "changed\n");
+    await execa("git", ["add", "changed.txt"], { cwd: repo });
+    await execa("git", ["commit", "-m", "change branch identity"], {
+      cwd: repo,
+    });
+    await execa(
+      "git",
+      ["update-ref", "refs/heads/watt/journal-archive", "HEAD"],
+      { cwd: repo },
+    );
+
+    await expect(
+      git.advanceWorkspaceOperation({
+        ...common,
+        target: "branch_outcome_recorded",
+      }),
+    ).resolves.toMatchObject({
+      state: "needs_attention",
+      reason: "branch_changed",
+    });
+    await execa(
+      "git",
+      ["show-ref", "--verify", "refs/heads/watt/journal-archive"],
+      { cwd: repo },
+    );
+  });
+
+  it("archives a missing worktree idempotently while retaining its branch", async () => {
+    const { repo, parent } = await initRepo();
+    temps.push(parent);
+    const git = createGit();
+    const worktreePath = path.join(parent, "journal-missing-archive");
+    await git.createWorktree({
+      repoRoot: repo,
+      worktreePath,
+      slug: "journal-missing-archive",
+      branch: "watt/journal-missing-archive",
+      baseRef: "HEAD",
+    });
+    await execa("git", ["worktree", "remove", "--force", worktreePath], {
+      cwd: repo,
+    });
+    const common = {
+      operationId: "01H00000000000000000000004",
+      type: "archive_workspace" as const,
+      repoRoot: repo,
+      worktreePath,
+      branch: "watt/journal-missing-archive",
+      keepBranch: true,
+      expectedHead: null,
+    };
+
+    await expect(
+      git.advanceWorkspaceOperation({
+        ...common,
+        target: "git_worktree_removed",
+      }),
+    ).resolves.toMatchObject({ state: "advanced" });
+    await expect(
+      git.advanceWorkspaceOperation({
+        ...common,
+        target: "branch_outcome_recorded",
+      }),
+    ).resolves.toMatchObject({
+      state: "advanced",
+      branchOutcome: "kept",
+    });
+    await execa(
+      "git",
+      ["show-ref", "--verify", "refs/heads/watt/journal-missing-archive"],
+      { cwd: repo },
+    );
+  });
+
+  it("marks a crash between worktree creation and provenance advance as ambiguous", async () => {
+    const { repo, parent } = await initRepo();
+    temps.push(parent);
+    const git = createGit();
+    const worktreePath = path.join(parent, "crash-window");
+    await git.createWorktree({
+      repoRoot: repo,
+      worktreePath,
+      slug: "crash-window",
+      branch: "watt/crash-window",
+      baseRef: "HEAD",
+    });
+    const operationId = "01H00000000000000000000003";
+    const repositoryIdentity = await realpath(path.join(repo, ".git"));
+    const expectedHead = (
+      await execa("git", ["rev-parse", "HEAD"], { cwd: repo })
+    ).stdout.trim();
+    const operationDirectory = path.join(repositoryIdentity, "watt-operations");
+    await mkdir(operationDirectory, { recursive: true });
+    await writeFile(
+      path.join(operationDirectory, `${operationId}.json`),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        operationId,
+        type: "create_workspace",
+        repositoryIdentity,
+        worktreePath,
+        branch: "watt/crash-window",
+        expectedHead,
+        phase: "intent_recorded",
+      })}\n`,
+    );
+
+    await expect(
+      git.advanceWorkspaceOperation({
+        operationId,
+        type: "create_workspace",
+        target: "git_worktree_created",
+        repoRoot: repo,
+        worktreePath,
+        slug: "crash-window",
+        branch: "watt/crash-window",
+        baseRef: "HEAD",
+      }),
+    ).resolves.toMatchObject({
+      state: "needs_attention",
+    });
+    await access(worktreePath);
+    await execa(
+      "git",
+      ["show-ref", "--verify", "refs/heads/watt/crash-window"],
+      { cwd: repo },
+    );
+  });
+
+  it("leaves an uncertain path untouched during archive recovery", async () => {
+    const { repo, parent } = await initRepo();
+    temps.push(parent);
+    const worktreePath = path.join(parent, "manual-directory");
+    await mkdir(worktreePath);
+    await writeFile(path.join(worktreePath, "user-data"), "keep\n");
+
+    await expect(
+      createGit().advanceWorkspaceOperation({
+        operationId: "01H00000000000000000000002",
+        type: "archive_workspace",
+        target: "git_worktree_removed",
+        repoRoot: repo,
+        worktreePath,
+        branch: "watt/manual-directory",
+        keepBranch: false,
+      }),
+    ).resolves.toMatchObject({
+      state: "needs_attention",
+      reason: "path_exists_outside_snapshot",
+    });
+    await access(path.join(worktreePath, "user-data"));
+  });
 });

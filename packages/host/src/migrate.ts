@@ -1,6 +1,6 @@
 import type { Database as SqliteDatabase } from "better-sqlite3";
 
-const VERSION = 2;
+const VERSION = 4;
 
 const V1_DDL = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -67,6 +67,57 @@ CREATE UNIQUE INDEX runs_session_active
 CREATE INDEX run_events_history ON run_events(run_id, sequence);
 `;
 
+const V3_DDL = `
+CREATE TABLE operations (
+  schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL CHECK (type IN ('create_workspace', 'archive_workspace')),
+  project_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  requested_json TEXT NOT NULL,
+  phase TEXT NOT NULL CHECK (phase IN (
+    'intent_recorded', 'git_worktree_created', 'path_verified',
+    'workspace_row_committed', 'operation_completed', 'active_runs_handled',
+    'git_worktree_removed', 'branch_outcome_recorded', 'workspace_archived'
+  )),
+  branch_outcome TEXT CHECK (branch_outcome IN ('kept', 'deleted', 'already_absent')),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_recovery_at INTEGER,
+  recovery_attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (recovery_attempt_count >= 0),
+  terminal_outcome TEXT CHECK (terminal_outcome IN ('succeeded', 'failed', 'needs_attention')),
+  terminal_at INTEGER,
+  compensation_outcome TEXT NOT NULL DEFAULT 'not_required'
+    CHECK (compensation_outcome IN ('not_required', 'succeeded', 'failed', 'unsafe')),
+  diagnostic_json TEXT,
+  CHECK (
+    (type = 'create_workspace' AND phase IN (
+      'intent_recorded', 'git_worktree_created', 'path_verified',
+      'workspace_row_committed', 'operation_completed'
+    )) OR
+    (type = 'archive_workspace' AND phase IN (
+      'intent_recorded', 'active_runs_handled', 'git_worktree_removed',
+      'branch_outcome_recorded', 'workspace_archived'
+    ))
+  ),
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+CREATE INDEX operations_project_history ON operations(project_id, created_at);
+CREATE INDEX operations_workspace_history ON operations(workspace_id, created_at);
+CREATE INDEX operations_recovery ON operations(updated_at)
+  WHERE terminal_outcome IS NULL OR terminal_outcome = 'needs_attention';
+`;
+
+const V4_DDL = `
+ALTER TABLE sessions ADD COLUMN model_params_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE sessions ADD COLUMN execution_policy_json TEXT NOT NULL DEFAULT '{"autoReview":false,"sandbox":{"enabled":false},"agentRetries":true,"toolAllowlist":null,"toolDenylist":[],"settingSources":["project","user","plugins"]}';
+CREATE TABLE capability_cache (
+  key TEXT PRIMARY KEY CHECK (key = 'cursor_models'),
+  payload_json TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL
+);
+`;
+
 export function migrate(database: SqliteDatabase): void {
   database.pragma("journal_mode = WAL");
   database.pragma("foreign_keys = ON");
@@ -100,6 +151,8 @@ export function migrate(database: SqliteDatabase): void {
       );
     }
     if (current < 2) database.exec(V2_DDL);
+    if (current < 3) database.exec(V3_DDL);
+    if (current < 4) database.exec(V4_DDL);
     database.pragma(`user_version = ${VERSION}`);
   })();
 }

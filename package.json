@@ -7,6 +7,8 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "check-types": "turbo run check-types",
+    "protocol:check": "pnpm --filter @watt/desktop-sidecar protocol:check",
+    "test:rust": "cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "benchmark:startup": "node scripts/benchmark-startup.mjs",
     "format": "prettier --write \"**/*.{ts,md}\""
   },

@@ -1,8 +1,11 @@
 {
-  "name": "@watt/agent",
+  "name": "@watt/desktop-sidecar",
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "bin": {
+    "watt-desktop-sidecar": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -10,15 +13,19 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "protocol.schema.json"
   ],
   "scripts": {
     "build": "tsc",
     "check-types": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "protocol:check": "node scripts/check-schema.mjs"
   },
   "dependencies": {
-    "@cursor/sdk": "1.0.29"
+    "@watt/host": "workspace:*",
+    "ajv": "^8.17.1",
+    "ulid": "^3.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

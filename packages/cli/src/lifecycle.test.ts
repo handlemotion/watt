@@ -10,6 +10,7 @@ import { runCli } from "./program.js";
 
 function host(): Host {
   return {
+    capabilities: vi.fn(),
     close: vi.fn(async () => undefined),
     projects: {
       register: vi.fn(),
@@ -34,6 +35,12 @@ function host(): Host {
       wait: vi.fn(),
       cancel: vi.fn(),
       attach: vi.fn(),
+    },
+    diagnostics: {
+      operations: {
+        get: vi.fn(),
+        list: vi.fn(),
+      },
     },
   };
 }
@@ -109,5 +116,102 @@ describe("CLI host lifetime", () => {
     release();
     await running;
     expect(completed).toBe(true);
+  });
+
+  it("passes explicit Plan mode and repeatable structured model parameters", async () => {
+    const instance = host();
+    vi.mocked(instance.sessions.create).mockResolvedValue({
+      session: {} as never,
+      run: { id: "run-1" } as never,
+    });
+    vi.mocked(instance.runs.attach).mockReturnValue({
+      async *[Symbol.asyncIterator]() {},
+    });
+    mocked.createHost.mockResolvedValue(instance);
+
+    await runCli([
+      "node",
+      "watt",
+      "agent",
+      "send",
+      "--workspace",
+      "workspace-1",
+      "--prompt",
+      "plan it",
+      "--model",
+      "model-a",
+      "--model-param",
+      "effort=high",
+      "--model-param",
+      "context=long",
+      "--mode",
+      "plan",
+    ]);
+
+    expect(instance.sessions.create).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      prompt: "plan it",
+      model: {
+        id: "model-a",
+        params: [
+          { id: "effort", value: "high" },
+          { id: "context", value: "long" },
+        ],
+      },
+      mode: "plan",
+    });
+    expect(instance.close).toHaveBeenCalledOnce();
+  });
+
+  it("rejects malformed, duplicate, and model-less parameters before opening a Host", async () => {
+    await expect(
+      runCli([
+        "node",
+        "watt",
+        "agent",
+        "send",
+        "--workspace",
+        "workspace-1",
+        "--prompt",
+        "go",
+        "--model",
+        "model-a",
+        "--model-param",
+        "broken",
+      ]),
+    ).rejects.toThrow("expected id=value");
+    await expect(
+      runCli([
+        "node",
+        "watt",
+        "agent",
+        "send",
+        "--workspace",
+        "workspace-1",
+        "--prompt",
+        "go",
+        "--model",
+        "model-a",
+        "--model-param",
+        "effort=low",
+        "--model-param",
+        "effort=high",
+      ]),
+    ).rejects.toThrow("duplicate --model-param: effort");
+    await expect(
+      runCli([
+        "node",
+        "watt",
+        "agent",
+        "send",
+        "--workspace",
+        "workspace-1",
+        "--prompt",
+        "go",
+        "--model-param",
+        "effort=high",
+      ]),
+    ).rejects.toThrow("--model is required");
+    expect(mocked.createHost).not.toHaveBeenCalled();
   });
 });

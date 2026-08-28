@@ -4,17 +4,32 @@ import path from "node:path";
 import {
   createAgent,
   createSdkRuntime,
+  normalizeExecutionPolicy,
   type AgentEvent,
+  type CustomTool,
+  type ExecutionPolicy,
   type WattAgent,
   type WattRun,
   type WattRunResult,
   type WattSessionHandle,
+  validateCustomTools,
 } from "@watt/agent";
-import { createGit, isPathInside, type GitService } from "@watt/git";
+import {
+  createGit,
+  isGitError,
+  isPathInside,
+  type GitService,
+  type WorkspaceOperationStepResult,
+} from "@watt/git";
 import Database from "better-sqlite3";
 import { ulid } from "ulid";
 
 import { HostError, isUniqueConstraint } from "./errors.js";
+import {
+  parseModelCatalog,
+  resolveModelSelection,
+  sanitizedCatalogError,
+} from "./capabilities.js";
 import { acquireHostLease } from "./lease.js";
 import { migrate } from "./migrate.js";
 import { reconcileProject } from "./reconcile.js";
@@ -24,11 +39,14 @@ import type {
   CreateHostOptions,
   Host,
   HostEvent,
+  HostCapabilities,
   Project,
   Run,
   RunResult,
   Session,
   Workspace,
+  WorkspaceOperation,
+  WorkspaceOperationDiagnostic,
 } from "./types.js";
 
 function now(): number {
@@ -51,10 +69,49 @@ function failure(runId: string, code: string, error: unknown): RunResult {
   };
 }
 
+function safeOperationDiagnostic(
+  code: string,
+  message: string,
+  observed?: Readonly<Record<string, unknown>>,
+): WorkspaceOperationDiagnostic {
+  const diagnostic: WorkspaceOperationDiagnostic = {
+    code: code.slice(0, 128),
+    message: message.slice(0, 512),
+  };
+  if (observed !== undefined) {
+    const encoded = JSON.stringify(observed);
+    if (encoded.length <= 2_048) diagnostic.observed = observed;
+  }
+  return diagnostic;
+}
+
+function operationFailure(error: unknown): WorkspaceOperationDiagnostic {
+  if (isGitError(error)) {
+    return safeOperationDiagnostic(error.code, "Git operation failed");
+  }
+  if (error instanceof HostError) {
+    return safeOperationDiagnostic(error.code, error.message);
+  }
+  return safeOperationDiagnostic(
+    "operation_failed",
+    error instanceof Error ? error.name : "Workspace operation failed",
+  );
+}
+
 export async function createHost(options: CreateHostOptions): Promise<Host> {
   const leaseTimeoutMs = options.leaseTimeoutMs ?? DEFAULT_LEASE_TIMEOUT_MS;
   if (!Number.isFinite(leaseTimeoutMs) || leaseTimeoutMs <= 0) {
     throw new HostError("leaseTimeoutMs must be positive", "invalid_options");
+  }
+  let defaultExecutionPolicy: ExecutionPolicy;
+  let customTools: CustomTool[];
+  try {
+    defaultExecutionPolicy = normalizeExecutionPolicy(options.executionPolicy);
+    customTools = validateCustomTools(options.customTools);
+  } catch (error) {
+    throw new HostError(errorMessage(error), "invalid_options", {
+      cause: error,
+    });
   }
   await mkdir(options.stateDir, { recursive: true });
   await mkdir(options.worktreeRoot, { recursive: true });
@@ -92,11 +149,109 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
   const cancelRequested = new Set<string>();
   const runVersions = new Map<string, number>();
   const runWaiters = new Map<string, Set<() => void>>();
+  const catalogValidatedRuns = new Set<string>();
+  let catalogRequest: Promise<HostCapabilities> | undefined;
 
   function assertOpen(): void {
     if (closing || closed) {
       throw new HostError("host is closed", "host_closed");
     }
+  }
+
+  async function discoverCapabilities(): Promise<HostCapabilities> {
+    try {
+      const models = parseModelCatalog(await agent.listModels());
+      const fetchedAt = now();
+      state.putCapabilityCache(models, fetchedAt);
+      return {
+        runtime: "cursor-local",
+        modes: ["agent", "plan"],
+        models,
+        modelCatalog: { status: "live", fetchedAt },
+        executionPolicy: {
+          defaults: normalizeExecutionPolicy({}, defaultExecutionPolicy),
+          controls: [
+            "autoReview",
+            "sandbox",
+            "agentRetries",
+            "toolAllowlist",
+            "toolDenylist",
+            "settingSources",
+          ],
+        },
+      };
+    } catch (error) {
+      const catalogError = sanitizedCatalogError(error);
+      const cached = state.getCapabilityCache();
+      if (cached) {
+        try {
+          return {
+            runtime: "cursor-local",
+            modes: ["agent", "plan"],
+            models: parseModelCatalog(
+              JSON.parse(cached.payloadJson) as unknown,
+            ),
+            modelCatalog: {
+              status: "cached",
+              fetchedAt: cached.fetchedAt,
+              error: catalogError,
+            },
+            executionPolicy: {
+              defaults: normalizeExecutionPolicy({}, defaultExecutionPolicy),
+              controls: [
+                "autoReview",
+                "sandbox",
+                "agentRetries",
+                "toolAllowlist",
+                "toolDenylist",
+                "settingSources",
+              ],
+            },
+          };
+        } catch {
+          // A corrupt cache is unavailable rather than trusted as capability data.
+        }
+      }
+      return {
+        runtime: "cursor-local",
+        modes: ["agent", "plan"],
+        models: [],
+        modelCatalog: {
+          status: "unavailable",
+          fetchedAt: null,
+          error: catalogError,
+        },
+        executionPolicy: {
+          defaults: normalizeExecutionPolicy({}, defaultExecutionPolicy),
+          controls: [
+            "autoReview",
+            "sandbox",
+            "agentRetries",
+            "toolAllowlist",
+            "toolDenylist",
+            "settingSources",
+          ],
+        },
+      };
+    }
+  }
+
+  function capabilities(): Promise<HostCapabilities> {
+    catalogRequest ??= discoverCapabilities().finally(() => {
+      catalogRequest = undefined;
+    });
+    return catalogRequest;
+  }
+
+  async function availableModels() {
+    const value = await capabilities();
+    if (value.modelCatalog.status === "unavailable") {
+      throw new HostError(
+        value.modelCatalog.error.message,
+        "model_catalog_unavailable",
+      );
+    }
+    return value.models;
   }
 
   function requireProject(id: string): Project {
@@ -139,15 +294,31 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
     for (const resolve of waiters) resolve();
   }
 
-  function waitForRunChange(runId: string, version: number): Promise<void> {
+  function waitForRunChange(
+    runId: string,
+    version: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     return new Promise((resolve) => {
       const waiters = runWaiters.get(runId) ?? new Set<() => void>();
-      waiters.add(resolve);
-      runWaiters.set(runId, waiters);
-      if ((runVersions.get(runId) ?? 0) !== version) {
-        waiters.delete(resolve);
+      let settled = false;
+      const settle = (changed: boolean) => {
+        if (settled) return;
+        settled = true;
+        waiters.delete(wake);
         if (waiters.size === 0) runWaiters.delete(runId);
-        resolve();
+        signal?.removeEventListener("abort", abort);
+        resolve(changed);
+      };
+      const wake = () => settle(true);
+      const abort = () => settle(false);
+      waiters.add(wake);
+      runWaiters.set(runId, waiters);
+      signal?.addEventListener("abort", abort, { once: true });
+      if ((runVersions.get(runId) ?? 0) !== version) {
+        settle(true);
+      } else if (signal?.aborted) {
+        settle(false);
       }
     });
   }
@@ -171,6 +342,9 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
     const handle = await agent.resume({
       cwd: workspace.worktreePath,
       model: session.model,
+      mode: session.mode,
+      executionPolicy: session.executionPolicy,
+      customTools,
       cursorAgentId: session.cursorAgentId,
       workspace: workspaceInfo(workspace),
     });
@@ -287,6 +461,9 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
       if (stored.prompt === null) {
         throw new Error("queued run is missing its prompt");
       }
+      if (!catalogValidatedRuns.delete(stored.value.id)) {
+        resolveModelSelection(session.model, await availableModels());
+      }
       const handle = await sessionHandle(session, workspace);
       const started = await handle.send(stored.prompt, {
         idempotencyKey: stored.value.id,
@@ -302,7 +479,14 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
         stored.value.id,
         failure(
           stored.value.id,
-          stored.cursorRunId ? "run_recovery_failed" : "run_dispatch_failed",
+          stored.cursorRunId
+            ? "run_recovery_failed"
+            : error instanceof HostError &&
+                (error.code === "model_catalog_unavailable" ||
+                  error.code === "model_unavailable" ||
+                  error.code === "unsupported_model_parameter")
+              ? error.code
+              : "run_dispatch_failed",
           error,
         ),
       );
@@ -373,7 +557,335 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
     return awaitResult(runId);
   }
 
+  function transitionOperation(
+    operationId: string,
+    expected: WorkspaceOperation["phase"],
+    next: WorkspaceOperation["phase"],
+    branchOutcome?: WorkspaceOperation["branchOutcome"],
+  ): void {
+    const changed = state.advanceOperation(
+      operationId,
+      expected,
+      next,
+      now(),
+      branchOutcome ?? undefined,
+    );
+    if (!changed && state.getOperation(operationId)?.phase !== next) {
+      throw new HostError(
+        `operation phase conflict: ${operationId}`,
+        "operation_phase_conflict",
+      );
+    }
+  }
+
+  function recordAttention(
+    operation: WorkspaceOperation,
+    result: Extract<WorkspaceOperationStepResult, { state: "needs_attention" }>,
+  ): void {
+    state.finishOperation(
+      operation.id,
+      "needs_attention",
+      "unsafe",
+      safeOperationDiagnostic(
+        result.reason,
+        "Workspace operation requires manual attention",
+        result.observed,
+      ),
+      now(),
+    );
+  }
+
+  function createStepInput(
+    operation: Extract<WorkspaceOperation, { type: "create_workspace" }>,
+    target: "git_worktree_created" | "create_compensated",
+  ) {
+    return {
+      operationId: operation.id,
+      type: operation.type,
+      target,
+      repoRoot: requireProject(operation.projectId).repoRoot,
+      ...operation.requestedInputs,
+      copyGlobs: operation.requestedInputs.copyGlobs,
+    } as const;
+  }
+
+  async function recoverCreateOperation(
+    initial: Extract<WorkspaceOperation, { type: "create_workspace" }>,
+  ): Promise<Workspace | undefined> {
+    let operation = state.getOperation(initial.id) as typeof initial;
+    let createdResult:
+      Extract<WorkspaceOperationStepResult, { state: "advanced" }> | undefined;
+    if (operation.phase === "intent_recorded") {
+      const result = await git.advanceWorkspaceOperation(
+        createStepInput(operation, "git_worktree_created"),
+      );
+      if (result.state === "needs_attention") {
+        recordAttention(operation, result);
+        return undefined;
+      }
+      createdResult = result;
+      transitionOperation(
+        operation.id,
+        "intent_recorded",
+        "git_worktree_created",
+      );
+      operation = state.getOperation(operation.id) as typeof initial;
+    }
+    if (operation.phase === "git_worktree_created") {
+      const result =
+        createdResult ??
+        (await git.advanceWorkspaceOperation(
+          createStepInput(operation, "git_worktree_created"),
+        ));
+      if (result.state === "needs_attention") {
+        recordAttention(operation, result);
+        return undefined;
+      }
+      createdResult = result;
+      transitionOperation(
+        operation.id,
+        "git_worktree_created",
+        "path_verified",
+      );
+      operation = state.getOperation(operation.id) as typeof initial;
+    }
+    if (operation.phase === "path_verified") {
+      const result =
+        createdResult ??
+        (await git.advanceWorkspaceOperation(
+          createStepInput(operation, "git_worktree_created"),
+        ));
+      if (result.state === "needs_attention") {
+        recordAttention(operation, result);
+        return undefined;
+      }
+      const resolvedPath = await realpath(
+        operation.requestedInputs.worktreePath,
+      );
+      if (path.resolve(resolvedPath) !== path.resolve(result.worktreePath)) {
+        recordAttention(operation, {
+          state: "needs_attention",
+          reason: "operation_identity_mismatch",
+          repositoryIdentity: result.repositoryIdentity,
+          observed: { resolvedPath, worktreePath: result.worktreePath },
+        });
+        return undefined;
+      }
+      const inputs = operation.requestedInputs;
+      const existing = state.getWorkspace(operation.workspaceId);
+      if (existing) {
+        if (
+          existing.projectId !== operation.projectId ||
+          existing.slug !== inputs.slug ||
+          existing.branch !== inputs.branch ||
+          path.resolve(existing.worktreePath) !==
+            path.resolve(inputs.worktreePath)
+        ) {
+          state.finishOperation(
+            operation.id,
+            "needs_attention",
+            "unsafe",
+            safeOperationDiagnostic(
+              "workspace_row_conflict",
+              "Workspace row does not match the operation",
+            ),
+            now(),
+          );
+          return undefined;
+        }
+        transitionOperation(
+          operation.id,
+          "path_verified",
+          "workspace_row_committed",
+        );
+      } else {
+        const slugCollision = state.getActiveWorkspaceBySlug(
+          operation.projectId,
+          inputs.slug,
+        );
+        const pathCollision = state.getActiveWorkspaceByPath(
+          inputs.worktreePath,
+        );
+        if (slugCollision || pathCollision) {
+          state.finishOperation(
+            operation.id,
+            "needs_attention",
+            "unsafe",
+            safeOperationDiagnostic(
+              "workspace_row_conflict",
+              "An active workspace conflicts with the operation",
+            ),
+            now(),
+          );
+          return undefined;
+        }
+        const createdAt = now();
+        state.insertWorkspaceAndAdvanceOperation(
+          {
+            id: operation.workspaceId,
+            projectId: operation.projectId,
+            worktreePath: await realpath(inputs.worktreePath),
+            branch: inputs.branch,
+            slug: inputs.slug,
+            baseRef: inputs.baseRef,
+            createdAt,
+            archivedAt: null,
+          },
+          operation.id,
+          "path_verified",
+          "workspace_row_committed",
+          createdAt,
+        );
+      }
+      operation = state.getOperation(operation.id) as typeof initial;
+    }
+    if (operation.phase === "workspace_row_committed") {
+      transitionOperation(
+        operation.id,
+        "workspace_row_committed",
+        "operation_completed",
+      );
+      operation = state.getOperation(operation.id) as typeof initial;
+    }
+    if (operation.phase === "operation_completed") {
+      state.finishOperation(
+        operation.id,
+        "succeeded",
+        "not_required",
+        null,
+        now(),
+      );
+    }
+    return state.getWorkspace(operation.workspaceId);
+  }
+
+  function archiveStepInput(
+    operation: Extract<WorkspaceOperation, { type: "archive_workspace" }>,
+    target: "git_worktree_removed" | "branch_outcome_recorded",
+  ) {
+    return {
+      operationId: operation.id,
+      type: operation.type,
+      target,
+      repoRoot: requireProject(operation.projectId).repoRoot,
+      worktreePath: operation.requestedInputs.worktreePath,
+      branch: operation.requestedInputs.branch,
+      keepBranch: operation.requestedInputs.keepBranch,
+      expectedHead: operation.requestedInputs.expectedHead,
+    } as const;
+  }
+
+  async function recoverArchiveOperation(
+    initial: Extract<WorkspaceOperation, { type: "archive_workspace" }>,
+  ): Promise<Workspace | undefined> {
+    let operation = state.getOperation(initial.id) as typeof initial;
+    if (operation.phase === "intent_recorded") {
+      await Promise.all(
+        state
+          .listNonterminalRunsForWorkspace(operation.workspaceId)
+          .map((run) => cancelRun(run.value.id)),
+      );
+      transitionOperation(
+        operation.id,
+        "intent_recorded",
+        "active_runs_handled",
+      );
+      operation = state.getOperation(operation.id) as typeof initial;
+    }
+    if (operation.phase === "active_runs_handled") {
+      const result = await git.advanceWorkspaceOperation(
+        archiveStepInput(operation, "git_worktree_removed"),
+      );
+      if (result.state === "needs_attention") {
+        recordAttention(operation, result);
+        return undefined;
+      }
+      if (operation.requestedInputs.expectedHead !== result.expectedHead) {
+        state.updateOperationInputs(
+          operation.id,
+          { ...operation.requestedInputs, expectedHead: result.expectedHead },
+          now(),
+        );
+      }
+      transitionOperation(
+        operation.id,
+        "active_runs_handled",
+        "git_worktree_removed",
+      );
+      operation = state.getOperation(operation.id) as typeof initial;
+    }
+    if (operation.phase === "git_worktree_removed") {
+      const result = await git.advanceWorkspaceOperation(
+        archiveStepInput(operation, "branch_outcome_recorded"),
+      );
+      if (result.state === "needs_attention") {
+        recordAttention(operation, result);
+        return undefined;
+      }
+      if (!result.branchOutcome) {
+        throw new HostError(
+          "Git did not report a branch outcome",
+          "operation_phase_conflict",
+        );
+      }
+      transitionOperation(
+        operation.id,
+        "git_worktree_removed",
+        "branch_outcome_recorded",
+        result.branchOutcome,
+      );
+      operation = state.getOperation(operation.id) as typeof initial;
+    }
+    if (operation.phase === "branch_outcome_recorded") {
+      const archivedAt =
+        state.getWorkspace(operation.workspaceId)?.archivedAt ?? now();
+      state.archiveWorkspaceAndAdvanceOperation(
+        operation.workspaceId,
+        archivedAt,
+        operation.id,
+        "branch_outcome_recorded",
+        "workspace_archived",
+      );
+      operation = state.getOperation(operation.id) as typeof initial;
+    }
+    if (operation.phase === "workspace_archived") {
+      state.finishOperation(
+        operation.id,
+        "succeeded",
+        "not_required",
+        null,
+        now(),
+      );
+    }
+    return state.getWorkspace(operation.workspaceId);
+  }
+
+  async function recoverOperation(
+    operation: WorkspaceOperation,
+  ): Promise<void> {
+    state.recordRecoveryAttempt(operation.id, now());
+    try {
+      if (operation.type === "create_workspace") {
+        await recoverCreateOperation(operation);
+      } else {
+        await recoverArchiveOperation(operation);
+      }
+    } catch (error) {
+      state.finishOperation(
+        operation.id,
+        "needs_attention",
+        "unsafe",
+        operationFailure(error),
+        now(),
+      );
+    }
+  }
+
   const host: Host = {
+    async capabilities() {
+      assertOpen();
+      return capabilities();
+    },
     close() {
       if (closePromise) return closePromise;
       closing = true;
@@ -473,64 +985,81 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
             "workspace_path_exists",
           );
         }
-        await git.createWorktree({
-          repoRoot: project.repoRoot,
-          worktreePath,
-          slug,
-          branch,
-          baseRef,
-          copyGlobs: input.copyGlobs,
-        });
-        const resolvedPath = await realpath(worktreePath);
-        const pathCollision = state.getActiveWorkspaceByPath(resolvedPath);
-        if (pathCollision) {
-          await git.archiveWorktree({
-            repoRoot: project.repoRoot,
-            worktreePath: resolvedPath,
-            branch,
-            keepBranch: false,
-          });
-          throw new HostError(
-            `workspace path already exists: ${resolvedPath}`,
-            "workspace_path_exists",
-          );
-        }
-        const row = {
+        const createdAt = now();
+        const operation: Extract<
+          WorkspaceOperation,
+          { type: "create_workspace" }
+        > = {
+          schemaVersion: 1,
           id: ulid(),
+          type: "create_workspace",
           projectId: project.id,
-          worktreePath: resolvedPath,
-          branch,
-          slug,
-          baseRef,
-          createdAt: now(),
-          archivedAt: null,
-        };
-        try {
-          state.insertWorkspace(row);
-        } catch (error) {
-          await git.archiveWorktree({
-            repoRoot: project.repoRoot,
-            worktreePath: resolvedPath,
+          workspaceId: ulid(),
+          requestedInputs: {
+            slug,
             branch,
-            keepBranch: false,
-          });
-          if (isUniqueConstraint(error)) {
-            if (state.getActiveWorkspaceByPath(resolvedPath)) {
-              throw new HostError(
-                `workspace path already exists: ${resolvedPath}`,
-                "workspace_path_exists",
-                { cause: error },
-              );
-            }
+            baseRef,
+            worktreePath,
+            copyGlobs: [...(input.copyGlobs ?? [])],
+          },
+          phase: "intent_recorded",
+          branchOutcome: null,
+          createdAt,
+          updatedAt: createdAt,
+          lastRecoveryAt: null,
+          recoveryAttemptCount: 0,
+          terminalOutcome: null,
+          terminalAt: null,
+          compensationOutcome: "not_required",
+          diagnostic: null,
+        };
+        state.insertOperation(operation);
+        try {
+          const workspace = await recoverCreateOperation(operation);
+          if (!workspace) {
             throw new HostError(
-              `workspace slug already exists: ${slug}`,
-              "slug_exists",
-              { cause: error },
+              `workspace operation needs attention: ${operation.id}`,
+              "operation_needs_attention",
             );
           }
+          return workspace;
+        } catch (error) {
+          const latest = state.getOperation(operation.id);
+          if (latest?.terminalOutcome === "needs_attention") throw error;
+          let compensation: "not_required" | "succeeded" | "failed" | "unsafe" =
+            "not_required";
+          if (
+            latest?.type === "create_workspace" &&
+            (latest.phase === "git_worktree_created" ||
+              latest.phase === "path_verified")
+          ) {
+            try {
+              const result = await git.advanceWorkspaceOperation(
+                createStepInput(latest, "create_compensated"),
+              );
+              compensation =
+                result.state === "advanced" ? "succeeded" : "unsafe";
+            } catch {
+              compensation = "failed";
+            }
+          }
+          state.finishOperation(
+            operation.id,
+            compensation === "unsafe" ||
+              compensation === "failed" ||
+              latest?.phase === "workspace_row_committed" ||
+              latest?.phase === "operation_completed"
+              ? "needs_attention"
+              : "failed",
+            latest?.phase === "workspace_row_committed" ||
+              latest?.phase === "operation_completed"
+              ? "unsafe"
+              : compensation,
+            operationFailure(error),
+            now(),
+          );
           throw error;
         }
-        return row;
       },
       list(input) {
         assertOpen();
@@ -546,22 +1075,71 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
       async archive(input) {
         assertOpen();
         const workspace = requireWorkspace(input.workspaceId);
-        await Promise.all(
-          state
-            .listNonterminalRunsForWorkspace(workspace.id)
-            .map((run) => cancelRun(run.value.id)),
+        const snapshot = await git.inspectRepository(
+          requireProject(workspace.projectId).repoRoot,
         );
-        const project = requireProject(workspace.projectId);
-        await git.archiveWorktree({
-          repoRoot: project.repoRoot,
-          worktreePath: workspace.worktreePath,
-          branch: workspace.branch,
-          keepBranch: input.keepBranch,
-        });
-        if (workspace.archivedAt !== null) return workspace;
-        const archivedAt = now();
-        state.archiveWorkspace(workspace.id, archivedAt);
-        return { ...workspace, archivedAt };
+        const candidates = snapshot.worktrees.filter(
+          (worktree) =>
+            path.resolve(worktree.path) ===
+            path.resolve(workspace.worktreePath),
+        );
+        const expectedHead =
+          candidates.length === 1 &&
+          candidates[0]?.pathExists &&
+          !candidates[0].bare &&
+          candidates[0].branch === workspace.branch
+            ? candidates[0].head
+            : null;
+        const createdAt = now();
+        const operation: Extract<
+          WorkspaceOperation,
+          { type: "archive_workspace" }
+        > = {
+          schemaVersion: 1,
+          id: ulid(),
+          type: "archive_workspace",
+          projectId: workspace.projectId,
+          workspaceId: workspace.id,
+          requestedInputs: {
+            branch: workspace.branch,
+            worktreePath: workspace.worktreePath,
+            keepBranch: input.keepBranch ?? true,
+            expectedHead,
+          },
+          phase: "intent_recorded",
+          branchOutcome: null,
+          createdAt,
+          updatedAt: createdAt,
+          lastRecoveryAt: null,
+          recoveryAttemptCount: 0,
+          terminalOutcome: null,
+          terminalAt: null,
+          compensationOutcome: "not_required",
+          diagnostic: null,
+        };
+        state.insertOperation(operation);
+        try {
+          const archived = await recoverArchiveOperation(operation);
+          if (!archived) {
+            throw new HostError(
+              `workspace operation needs attention: ${operation.id}`,
+              "operation_needs_attention",
+            );
+          }
+          return archived;
+        } catch (error) {
+          const latest = state.getOperation(operation.id);
+          if (latest?.terminalOutcome !== "needs_attention") {
+            state.finishOperation(
+              operation.id,
+              "needs_attention",
+              "unsafe",
+              operationFailure(error),
+              now(),
+            );
+          }
+          throw error;
+        }
       },
     },
     sessions: {
@@ -571,11 +1149,22 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
         if (workspace.archivedAt !== null) {
           throw new HostError("workspace is archived", "workspace_archived");
         }
-        const model = input.model ?? "composer-2.5";
+        const model = resolveModelSelection(
+          input.model,
+          await availableModels(),
+        );
+        assertOpen();
+        const mode = input.mode ?? "agent";
+        const executionPolicy = normalizeExecutionPolicy(
+          input.executionPolicy,
+          defaultExecutionPolicy,
+        );
         const handle = await agent.create({
           cwd: workspace.worktreePath,
           model,
-          autoReview: input.autoReview,
+          mode,
+          executionPolicy,
+          customTools,
           workspace: workspaceInfo(workspace),
         });
         assertOpen();
@@ -583,8 +1172,9 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
           id: ulid(),
           workspaceId: workspace.id,
           cursorAgentId: handle.cursorAgentId,
-          mode: "agent",
+          mode,
           model,
+          executionPolicy,
           createdAt: now(),
         };
         const run: Run = {
@@ -596,6 +1186,7 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
           finishedAt: null,
         };
         state.insertSessionAndRun(session, run, input.prompt);
+        catalogValidatedRuns.add(run.id);
         sessionHandles.set(session.id, handle);
         scheduleSession(session.id);
         return { session, run };
@@ -607,6 +1198,8 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
         if (workspace.archivedAt !== null) {
           throw new HostError("workspace is archived", "workspace_archived");
         }
+        resolveModelSelection(session.model, await availableModels());
+        assertOpen();
         const run: Run = {
           id: ulid(),
           sessionId: session.id,
@@ -616,6 +1209,7 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
           finishedAt: null,
         };
         state.insertRun(run, input.prompt);
+        catalogValidatedRuns.add(run.id);
         scheduleSession(session.id);
         return { session, run };
       },
@@ -660,24 +1254,50 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
           async *[Symbol.asyncIterator]() {
             let sequence = afterSequence;
             for (;;) {
-              if (closing) return;
+              if (closing || input.signal?.aborted) return;
               const version = runVersions.get(input.runId) ?? 0;
               const events = state.listRunEventsAfter(input.runId, sequence);
               for (const row of events) {
+                if (input.signal?.aborted) return;
                 sequence = row.sequence;
                 yield parseEvent(row.event_json);
               }
               const stored = requireRun(input.runId);
               if (stored.result) return;
               if (events.length > 0) continue;
-              await waitForRunChange(input.runId, version);
+              if (
+                !(await waitForRunChange(input.runId, version, input.signal))
+              ) {
+                return;
+              }
             }
           },
         };
       },
     },
+    diagnostics: {
+      operations: {
+        get(input) {
+          assertOpen();
+          return state.getOperation(input.operationId);
+        },
+        list(input = {}) {
+          assertOpen();
+          return state.listOperations(input);
+        },
+      },
+    },
   };
 
+  try {
+    for (const operation of state.listRecoverableOperations()) {
+      await recoverOperation(operation);
+    }
+  } catch (error) {
+    database.close();
+    await hostLease.release();
+    throw error;
+  }
   for (const run of state.listNonterminalRuns()) {
     scheduleSession(run.value.sessionId);
   }

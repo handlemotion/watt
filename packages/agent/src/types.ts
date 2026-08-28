@@ -1,6 +1,47 @@
 export const DEFAULT_SETTING_SOURCES = ["project", "user", "plugins"] as const;
 
 export type SettingSource = (typeof DEFAULT_SETTING_SOURCES)[number];
+export type AgentMode = "agent" | "plan";
+
+export type ModelParameterValue = { id: string; value: string };
+export type ModelSelection = { id: string; params: ModelParameterValue[] };
+export type ModelParameterDefinition = {
+  id: string;
+  displayName?: string;
+  values: Array<{ value: string; displayName?: string }>;
+};
+export type ModelVariant = {
+  params: ModelParameterValue[];
+  displayName: string;
+  description?: string;
+  isDefault?: boolean;
+};
+export type ModelCapability = {
+  id: string;
+  displayName: string;
+  description?: string;
+  aliases: string[];
+  parameters: ModelParameterDefinition[];
+  variants: ModelVariant[];
+};
+
+export type ExecutionPolicy = {
+  autoReview: boolean;
+  sandbox: { enabled: boolean };
+  agentRetries: boolean;
+  toolAllowlist: string[] | null;
+  toolDenylist: string[];
+  settingSources: SettingSource[];
+};
+
+export type ExecutionPolicyInput = {
+  autoReview?: boolean;
+  sandbox?: { enabled?: boolean };
+  agentRetries?: boolean;
+  toolAllowlist?: string[] | null;
+  toolDenylist?: string[];
+  settingSources?: SettingSource[];
+};
 
 export type AgentEvent =
   | { type: "text_delta"; text: string }
@@ -23,11 +64,30 @@ export type WorkspaceInfo = {
   slug: string;
 };
 
+export type JsonValue =
+  string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
+
+export type CustomToolContent =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType?: string };
+export type CustomToolResult =
+  | string
+  | JsonValue
+  | {
+      content: CustomToolContent[];
+      isError?: boolean;
+      structuredContent?: Record<string, JsonValue>;
+    };
+export type CustomToolContext = { toolCallId?: string };
 export type CustomTool = {
   name: string;
   description: string;
-  inputSchema?: Record<string, unknown>;
-  execute: (args: Record<string, unknown>) => Promise<unknown> | unknown;
+  inputSchema?: Record<string, JsonValue>;
+  outputSchema?: Record<string, JsonValue>;
+  execute: (
+    args: Record<string, JsonValue>,
+    context: CustomToolContext,
+  ) => Promise<CustomToolResult> | CustomToolResult;
 };
 
 export type SdkStreamMessage =
@@ -73,15 +133,16 @@ export type CursorAgentHandle = {
 export type CreateRuntimeInput = {
   apiKey?: string;
   cwd: string;
-  model: string;
-  autoReview?: boolean;
+  model: ModelSelection;
+  mode: AgentMode;
+  executionPolicy: ExecutionPolicy;
   customTools: CustomTool[];
-  settingSources: readonly SettingSource[];
 };
 
 export type ResumeRuntimeInput = CreateRuntimeInput & { agentId: string };
 
 export type CursorRuntime = {
+  listModels: (input?: { apiKey?: string }) => Promise<ModelCapability[]>;
   create: (input: CreateRuntimeInput) => Promise<CursorAgentHandle>;
   resume: (input: ResumeRuntimeInput) => Promise<CursorAgentHandle>;
   getRun: (input: { cursorRunId: string; cwd: string }) => Promise<CursorRun>;
@@ -89,8 +150,9 @@ export type CursorRuntime = {
 
 export type CreateAgentInput = {
   cwd: string;
-  model?: string;
-  autoReview?: boolean;
+  model: ModelSelection;
+  mode?: AgentMode;
+  executionPolicy?: ExecutionPolicyInput;
   workspace: WorkspaceInfo;
   customTools?: CustomTool[];
 };
@@ -119,6 +181,7 @@ export type WattSessionHandle = {
 };
 
 export type WattAgent = {
+  listModels: () => Promise<ModelCapability[]>;
   create: (input: CreateAgentInput) => Promise<WattSessionHandle>;
   resume: (input: ResumeAgentInput) => Promise<WattSessionHandle>;
   getRun: (input: { cursorRunId: string; cwd: string }) => Promise<WattRun>;

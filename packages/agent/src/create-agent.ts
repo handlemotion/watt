@@ -1,11 +1,12 @@
 import type { CursorRun } from "./types.js";
 import { assertAgentEvent, mapUnknownSdkMessage } from "./events.js";
+import { normalizeExecutionPolicy } from "./policy.js";
 import { mergeCustomTools } from "./tools.js";
 import {
-  DEFAULT_SETTING_SOURCES,
   type CreateAgentInput,
   type CursorAgentHandle,
   type CursorRuntime,
+  type ModelSelection,
   type ResumeAgentInput,
   type WattAgent,
   type WattRun,
@@ -16,6 +17,13 @@ export type CreateWattAgentOptions = {
   runtime: CursorRuntime;
   apiKey?: string;
 };
+
+function copyModel(model: ModelSelection): ModelSelection {
+  return {
+    id: model.id,
+    params: model.params.map((parameter) => ({ ...parameter })),
+  };
+}
 
 function wrapRun(run: CursorRun): WattRun {
   return {
@@ -57,14 +65,17 @@ export function createAgent(options: CreateWattAgentOptions): WattAgent {
   const { runtime, apiKey } = options;
 
   return {
+    listModels() {
+      return runtime.listModels({ apiKey });
+    },
     async create(input: CreateAgentInput) {
       const handle = await runtime.create({
         apiKey,
         cwd: input.cwd,
-        model: input.model ?? "composer-2.5",
-        autoReview: input.autoReview,
+        model: copyModel(input.model),
+        mode: input.mode ?? "agent",
+        executionPolicy: normalizeExecutionPolicy(input.executionPolicy),
         customTools: mergeCustomTools(input.workspace, input.customTools),
-        settingSources: DEFAULT_SETTING_SOURCES,
       });
       return bindHandle(handle);
     },
@@ -73,10 +84,10 @@ export function createAgent(options: CreateWattAgentOptions): WattAgent {
         apiKey,
         agentId: input.cursorAgentId,
         cwd: input.cwd,
-        model: input.model ?? "composer-2.5",
-        autoReview: input.autoReview,
+        model: copyModel(input.model),
+        mode: input.mode ?? "agent",
+        executionPolicy: normalizeExecutionPolicy(input.executionPolicy),
         customTools: mergeCustomTools(input.workspace, input.customTools),
-        settingSources: DEFAULT_SETTING_SOURCES,
       });
       return bindHandle(handle);
     },
