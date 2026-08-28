@@ -1,4 +1,4 @@
-import type { SDKCustomTool } from "@cursor/sdk";
+import type { SDKAgent, SDKCustomTool, SDKModel } from "@cursor/sdk";
 
 import { parseSdkStreamMessage } from "./events.js";
 import type {
@@ -7,9 +7,8 @@ import type {
   CursorRun,
   CursorRuntime,
   CustomTool,
+  ModelCapability,
   ResumeRuntimeInput,
-  SendRunOptions,
-  SettingSource,
   WattRunResult,
 } from "./types.js";
 
@@ -18,33 +17,60 @@ function toSdkCustomTools(tools: CustomTool[]): Record<string, SDKCustomTool> {
   for (const tool of tools) {
     const sdkTool: SDKCustomTool = {
       description: tool.description,
-      execute: async (args) => {
-        const result = await tool.execute(asRecord(args));
-        return typeof result === "string" ? result : JSON.stringify(result);
+      execute: async (args, context) => {
+        return tool.execute(args, context);
       },
     };
     if (tool.inputSchema) {
       sdkTool.inputSchema = tool.inputSchema as SDKCustomTool["inputSchema"];
+    }
+    if (tool.outputSchema) {
+      sdkTool.outputSchema = tool.outputSchema as SDKCustomTool["outputSchema"];
     }
     record[tool.name] = sdkTool;
   }
   return record;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return {};
-}
-
 function localOptions(input: CreateRuntimeInput) {
   return {
     cwd: input.cwd,
-    settingSources: [...input.settingSources] as SettingSource[],
-    autoReview: input.autoReview,
+    settingSources: [...input.executionPolicy.settingSources],
+    autoReview: input.executionPolicy.autoReview,
+    sandboxOptions: { enabled: input.executionPolicy.sandbox.enabled },
+    enableAgentRetries: input.executionPolicy.agentRetries,
     customTools: toSdkCustomTools(input.customTools),
   };
+}
+
+function modelCapability(model: SDKModel): ModelCapability {
+  const capability: ModelCapability = {
+    id: model.id,
+    displayName: model.displayName,
+    aliases: [...(model.aliases ?? [])],
+    parameters: (model.parameters ?? []).map((parameter) => {
+      const mapped = {
+        id: parameter.id,
+        values: parameter.values.map((value) => ({ ...value })),
+      };
+      return parameter.displayName === undefined
+        ? mapped
+        : { ...mapped, displayName: parameter.displayName };
+    }),
+    variants: (model.variants ?? []).map((variant) => ({
+      params: variant.params.map((parameter) => ({ ...parameter })),
+      displayName: variant.displayName,
+      ...(variant.description === undefined
+        ? {}
+        : { description: variant.description }),
+      ...(variant.isDefault === undefined
+        ? {}
+        : { isDefault: variant.isDefault }),
+    })),
+  };
+  if (model.description !== undefined)
+    capability.description = model.description;
+  return capability;
 }
 
 type SdkRunLike = {
@@ -98,14 +124,21 @@ function wrapSdkRun(run: SdkRunLike): CursorRun {
   };
 }
 
-function wrapSdkAgent(agent: {
-  agentId: string;
-  send: (prompt: string, options?: SendRunOptions) => Promise<SdkRunLike>;
-}): CursorAgentHandle {
+function wrapSdkAgent(
+  agent: Pick<SDKAgent, "agentId" | "send">,
+  input: CreateRuntimeInput,
+): CursorAgentHandle {
   return {
     agentId: agent.agentId,
     async send(prompt, options) {
-      return wrapSdkRun(await agent.send(prompt, options));
+      return wrapSdkRun(
+        await agent.send(prompt, {
+          idempotencyKey: options?.idempotencyKey,
+          model: input.model,
+          mode: input.mode,
+          local: { customTools: toSdkCustomTools(input.customTools) },
+        }),
+      );
     },
   };
 }
@@ -119,23 +152,35 @@ function loadSdk(): Promise<typeof import("@cursor/sdk")> {
 
 export function createSdkRuntime(): CursorRuntime {
   return {
+    async listModels(input) {
+      const { Cursor } = await loadSdk();
+      return (await Cursor.models.list({ apiKey: input?.apiKey })).map(
+        modelCapability,
+      );
+    },
     async create(input: CreateRuntimeInput) {
       const { Agent } = await loadSdk();
       const agent = await Agent.create({
         apiKey: input.apiKey,
-        model: { id: input.model },
+        model: input.model,
+        mode: input.mode,
+        tools: input.executionPolicy.toolAllowlist ?? undefined,
+        disallowedTools: input.executionPolicy.toolDenylist,
         local: localOptions(input),
       });
-      return wrapSdkAgent(agent);
+      return wrapSdkAgent(agent, input);
     },
     async resume(input: ResumeRuntimeInput) {
       const { Agent } = await loadSdk();
       const agent = await Agent.resume(input.agentId, {
         apiKey: input.apiKey,
-        model: { id: input.model },
+        model: input.model,
+        mode: input.mode,
+        tools: input.executionPolicy.toolAllowlist ?? undefined,
+        disallowedTools: input.executionPolicy.toolDenylist,
         local: localOptions(input),
       });
-      return wrapSdkAgent(agent);
+      return wrapSdkAgent(agent, input);
     },
     async getRun(input) {
       const { Agent } = await loadSdk();

@@ -15,17 +15,22 @@ const sdk = vi.hoisted(() => ({
   loads: 0,
   creates: 0,
   gets: 0,
+  createOptions: [] as unknown[],
+  resumeOptions: [] as unknown[],
+  sendOptions: [] as unknown[],
 }));
 
 vi.mock("@cursor/sdk", () => {
   sdk.loads += 1;
   return {
     Agent: {
-      async create() {
+      async create(options: unknown) {
         sdk.creates += 1;
+        sdk.createOptions.push(options);
         return {
           agentId: `runtime-${sdk.creates}`,
-          async send() {
+          async send(_prompt: string, options: unknown) {
+            sdk.sendOptions.push(options);
             return {
               id: `sdk-run-${sdk.creates}`,
               async *stream() {},
@@ -39,8 +44,20 @@ vi.mock("@cursor/sdk", () => {
           },
         };
       },
-      async resume() {
-        throw new Error("not used by this test");
+      async resume(_agentId: string, options: unknown) {
+        sdk.resumeOptions.push(options);
+        return {
+          agentId: "runtime-resumed",
+          async send(_prompt: string, options: unknown) {
+            sdk.sendOptions.push(options);
+            return {
+              id: "sdk-run-resumed",
+              async *stream() {},
+              wait: async () => ({ status: "finished" }),
+              cancel: async () => undefined,
+            };
+          },
+        };
       },
       async getRun(runId: string) {
         sdk.gets += 1;
@@ -52,6 +69,33 @@ vi.mock("@cursor/sdk", () => {
         };
       },
     },
+    Cursor: {
+      models: {
+        async list() {
+          return [
+            {
+              id: "composer-2.5",
+              displayName: "Composer",
+              aliases: ["composer"],
+              parameters: [
+                {
+                  id: "effort",
+                  displayName: "Effort",
+                  values: [{ value: "high", displayName: "High" }],
+                },
+              ],
+              variants: [
+                {
+                  params: [{ id: "effort", value: "high" }],
+                  displayName: "High",
+                  isDefault: true,
+                },
+              ],
+            },
+          ];
+        },
+      },
+    },
   };
 });
 
@@ -61,6 +105,16 @@ const workspace = {
   worktreePath: "/tmp/wt",
   branch: "watt/one",
   slug: "one",
+};
+
+const model = { id: "composer-2.5", params: [{ id: "effort", value: "high" }] };
+const executionPolicy = {
+  autoReview: false,
+  sandbox: { enabled: false },
+  agentRetries: true,
+  toolAllowlist: ["read", "mcp"],
+  toolDenylist: ["shell"],
+  settingSources: ["project", "user", "plugins"] as const,
 };
 
 function messages(
@@ -90,6 +144,17 @@ function mockRuntime(): CursorRuntime & {
     resumed,
     recovered,
     idempotencyKeys,
+    async listModels() {
+      return [
+        {
+          id: model.id,
+          displayName: "Composer",
+          aliases: [],
+          parameters: [],
+          variants: [],
+        },
+      ];
+    },
     async create(input) {
       created.push(input);
       return {
@@ -175,6 +240,28 @@ describe("mapSdkMessage", () => {
         args: {},
       }),
     ).toEqual([{ type: "tool_call", callId: "1", name: "edit", args: {} }]);
+    const structuredResult = {
+      content: [{ type: "text", text: "failed" }],
+      structuredContent: { answer: 42 },
+      isError: true,
+    };
+    expect(
+      mapSdkMessage({
+        type: "tool_call",
+        call_id: "1",
+        name: "structured",
+        status: "error",
+        result: structuredResult,
+      }),
+    ).toEqual([
+      {
+        type: "tool_result",
+        callId: "1",
+        name: "structured",
+        result: structuredResult,
+        ok: false,
+      },
+    ]);
     expect(mapSdkMessage({ type: "user" })).toEqual([]);
   });
 
@@ -201,7 +288,13 @@ describe("createAgent", () => {
       runtime,
       apiKey: "secret-key-should-not-appear",
     });
-    const session = await agent.create({ cwd: "/tmp/wt", workspace });
+    const session = await agent.create({
+      cwd: "/tmp/wt",
+      workspace,
+      model,
+      mode: "plan",
+      executionPolicy,
+    });
     const run = await session.send("go", { idempotencyKey: "watt-run-1" });
     expect(run.cursorRunId).toBe("run-new");
     expect(runtime.idempotencyKeys).toEqual(["watt-run-1"]);
@@ -215,7 +308,7 @@ describe("createAgent", () => {
       "tool_result",
       "status",
     ]);
-    expect(runtime.created[0]?.settingSources).toEqual([
+    expect(runtime.created[0]?.executionPolicy.settingSources).toEqual([
       "project",
       "user",
       "plugins",
@@ -225,6 +318,16 @@ describe("createAgent", () => {
         (tool) => tool.name === WATT_WORKSPACE_INFO_TOOL,
       ),
     ).toBe(true);
+    expect(runtime.created[0]).toMatchObject({
+      model,
+      mode: "plan",
+      executionPolicy: {
+        sandbox: { enabled: false },
+        agentRetries: true,
+        toolAllowlist: ["read", "mcp"],
+        toolDenylist: ["shell"],
+      },
+    });
     expect(
       events.every(
         (event) =>
@@ -235,6 +338,9 @@ describe("createAgent", () => {
     const resumed = await agent.resume({
       cwd: "/tmp/wt",
       workspace,
+      model,
+      mode: "plan",
+      executionPolicy,
       cursorAgentId: "agent_new",
     });
     expect(resumed.cursorAgentId).toBe("agent_new");
@@ -259,23 +365,73 @@ describe("createSdkRuntime", () => {
     const runtime = createSdkRuntime();
     expect(sdk.loads).toBe(0);
 
+    expect(await runtime.listModels()).toEqual([
+      expect.objectContaining({
+        id: "composer-2.5",
+        parameters: [expect.objectContaining({ id: "effort" })],
+        variants: [expect.objectContaining({ isDefault: true })],
+      }),
+    ]);
+
     await Promise.all([
       runtime.create({
         cwd: "/tmp/wt-a",
-        model: "composer-2.5",
+        model,
+        mode: "plan",
+        executionPolicy: {
+          ...executionPolicy,
+          settingSources: [...executionPolicy.settingSources],
+        },
         customTools: [],
-        settingSources: ["project", "user", "plugins"],
       }),
       runtime.create({
         cwd: "/tmp/wt-b",
-        model: "composer-2.5",
+        model,
+        mode: "agent",
+        executionPolicy: {
+          ...executionPolicy,
+          settingSources: [...executionPolicy.settingSources],
+        },
         customTools: [],
-        settingSources: ["project", "user", "plugins"],
       }),
     ]);
 
     expect(sdk.loads).toBe(1);
     expect(sdk.creates).toBe(2);
+    expect(sdk.createOptions[0]).toMatchObject({
+      model,
+      mode: "plan",
+      tools: ["read", "mcp"],
+      disallowedTools: ["shell"],
+      local: {
+        autoReview: false,
+        sandboxOptions: { enabled: false },
+        enableAgentRetries: true,
+      },
+    });
+    const resumed = await runtime.resume({
+      agentId: "existing-agent",
+      cwd: "/tmp/wt-a",
+      model,
+      mode: "plan",
+      executionPolicy: {
+        ...executionPolicy,
+        settingSources: [...executionPolicy.settingSources],
+      },
+      customTools: [],
+    });
+    expect(sdk.resumeOptions.at(-1)).toMatchObject({
+      model,
+      mode: "plan",
+      tools: ["read", "mcp"],
+      disallowedTools: ["shell"],
+      local: {
+        sandboxOptions: { enabled: false },
+        enableAgentRetries: true,
+      },
+    });
+    await resumed.send("resumed follow-up");
+    expect(sdk.sendOptions.at(-1)).toMatchObject({ model, mode: "plan" });
 
     const run = await runtime.getRun({
       cursorRunId: "sdk-existing",
@@ -287,5 +443,70 @@ describe("createSdkRuntime", () => {
       result: "recovered",
     });
     expect(sdk.gets).toBe(1);
+  });
+
+  it("preserves custom-tool schemas, context, structured results, and follow-up options", async () => {
+    const runtime = createSdkRuntime();
+    let receivedContext: unknown;
+    const handle = await runtime.create({
+      cwd: "/tmp/wt-tools",
+      model,
+      mode: "plan",
+      executionPolicy: {
+        ...executionPolicy,
+        settingSources: [...executionPolicy.settingSources],
+      },
+      customTools: [
+        {
+          name: "structured",
+          description: "structured result",
+          outputSchema: {
+            type: "object",
+            properties: { answer: { type: "number" } },
+          },
+          execute(_args, context) {
+            receivedContext = context;
+            return {
+              content: [{ type: "text", text: "failed" }],
+              structuredContent: { answer: 42 },
+              isError: true,
+            };
+          },
+        },
+      ],
+    });
+    const created = sdk.createOptions.at(-1) as {
+      local: {
+        customTools: Record<
+          string,
+          {
+            outputSchema?: unknown;
+            execute: (
+              args: Record<string, never>,
+              context: { toolCallId?: string },
+            ) => Promise<unknown>;
+          }
+        >;
+      };
+    };
+    const tool = created.local.customTools.structured;
+    expect(tool?.outputSchema).toEqual({
+      type: "object",
+      properties: { answer: { type: "number" } },
+    });
+    await expect(tool?.execute({}, { toolCallId: "call-1" })).resolves.toEqual({
+      content: [{ type: "text", text: "failed" }],
+      structuredContent: { answer: 42 },
+      isError: true,
+    });
+    expect(receivedContext).toEqual({ toolCallId: "call-1" });
+
+    await handle.send("continue", { idempotencyKey: "follow-up" });
+    expect(sdk.sendOptions.at(-1)).toMatchObject({
+      idempotencyKey: "follow-up",
+      model,
+      mode: "plan",
+      local: { customTools: { structured: expect.any(Object) } },
+    });
   });
 });

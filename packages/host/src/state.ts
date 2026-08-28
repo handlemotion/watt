@@ -1,6 +1,20 @@
 import type { Database as SqliteDatabase } from "better-sqlite3";
 
-import type { Project, Run, RunResult, Session, Workspace } from "./types.js";
+import { parseExecutionPolicy, parseModelParameters } from "./capabilities.js";
+
+import type {
+  Project,
+  Run,
+  RunResult,
+  Session,
+  Workspace,
+  WorkspaceOperation,
+  WorkspaceOperationBranchOutcome,
+  WorkspaceOperationCompensationOutcome,
+  WorkspaceOperationDiagnostic,
+  WorkspaceOperationPhase,
+  WorkspaceOperationTerminalOutcome,
+} from "./types.js";
 
 type ProjectRow = { id: string; repo_root: string; created_at: number };
 type WorkspaceRow = {
@@ -19,6 +33,8 @@ type SessionRow = {
   cursor_agent_id: string;
   mode: string;
   model: string;
+  model_params_json: string;
+  execution_policy_json: string;
   created_at: number;
 };
 type RunRow = {
@@ -37,6 +53,25 @@ type RunRow = {
   duration_ms: number | null;
 };
 type RunEventRow = { sequence: number; event_json: string };
+type CapabilityCacheRow = { payload_json: string; fetched_at: number };
+type OperationRow = {
+  schema_version: 1;
+  id: string;
+  type: "create_workspace" | "archive_workspace";
+  project_id: string;
+  workspace_id: string;
+  requested_json: string;
+  phase: WorkspaceOperationPhase;
+  branch_outcome: WorkspaceOperationBranchOutcome | null;
+  created_at: number;
+  updated_at: number;
+  last_recovery_at: number | null;
+  recovery_attempt_count: number;
+  terminal_outcome: WorkspaceOperationTerminalOutcome | null;
+  terminal_at: number | null;
+  compensation_outcome: WorkspaceOperationCompensationOutcome;
+  diagnostic_json: string | null;
+};
 
 export type StoredRun = {
   value: Run;
@@ -64,12 +99,19 @@ function workspace(row: WorkspaceRow): Workspace {
 }
 
 function session(row: SessionRow): Session {
+  if (row.mode !== "agent" && row.mode !== "plan") {
+    throw new Error(`invalid persisted session mode: ${row.mode}`);
+  }
   return {
     id: row.id,
     workspaceId: row.workspace_id,
     cursorAgentId: row.cursor_agent_id,
-    mode: "agent",
-    model: row.model,
+    mode: row.mode,
+    model: {
+      id: row.model,
+      params: parseModelParameters(parseJson(row.model_params_json)),
+    },
+    executionPolicy: parseExecutionPolicy(parseJson(row.execution_policy_json)),
     createdAt: row.created_at,
   };
 }
@@ -107,8 +149,49 @@ function storedRun(row: RunRow): StoredRun {
   };
 }
 
+function parseJson(encoded: string): unknown {
+  return JSON.parse(encoded) as unknown;
+}
+
+function operation(row: OperationRow): WorkspaceOperation {
+  const common = {
+    schemaVersion: row.schema_version,
+    id: row.id,
+    projectId: row.project_id,
+    workspaceId: row.workspace_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastRecoveryAt: row.last_recovery_at,
+    recoveryAttemptCount: row.recovery_attempt_count,
+    terminalOutcome: row.terminal_outcome,
+    terminalAt: row.terminal_at,
+    compensationOutcome: row.compensation_outcome,
+    diagnostic:
+      row.diagnostic_json === null
+        ? null
+        : (parseJson(row.diagnostic_json) as WorkspaceOperationDiagnostic),
+    branchOutcome: row.branch_outcome,
+  };
+  if (row.type === "create_workspace") {
+    return {
+      ...common,
+      type: row.type,
+      phase: row.phase,
+      requestedInputs: parseJson(row.requested_json),
+    } as WorkspaceOperation;
+  }
+  return {
+    ...common,
+    type: row.type,
+    phase: row.phase,
+    requestedInputs: parseJson(row.requested_json),
+  } as WorkspaceOperation;
+}
+
 const RUN_COLUMNS =
   "id, session_id, cursor_run_id, status, prompt, created_at, started_at, finished_at, result_text, error_message, error_code, duration_ms";
+const OPERATION_COLUMNS =
+  "schema_version, id, type, project_id, workspace_id, requested_json, phase, branch_outcome, created_at, updated_at, last_recovery_at, recovery_attempt_count, terminal_outcome, terminal_at, compensation_outcome, diagnostic_json";
 
 /** The one SQLite-specific persistence boundary used by the host workflow. */
 export function createState(database: SqliteDatabase) {
@@ -147,13 +230,13 @@ export function createState(database: SqliteDatabase) {
       "UPDATE workspaces SET archived_at = ? WHERE id = ?",
     ),
     sessionById: database.prepare(
-      "SELECT id, workspace_id, cursor_agent_id, mode, model, created_at FROM sessions WHERE id = ?",
+      "SELECT id, workspace_id, cursor_agent_id, mode, model, model_params_json, execution_policy_json, created_at FROM sessions WHERE id = ?",
     ),
     sessionsForWorkspace: database.prepare(
-      "SELECT id, workspace_id, cursor_agent_id, mode, model, created_at FROM sessions WHERE workspace_id = ? ORDER BY created_at",
+      "SELECT id, workspace_id, cursor_agent_id, mode, model, model_params_json, execution_policy_json, created_at FROM sessions WHERE workspace_id = ? ORDER BY created_at",
     ),
     insertSession: database.prepare(
-      "INSERT INTO sessions (id, workspace_id, cursor_agent_id, mode, model, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO sessions (id, workspace_id, cursor_agent_id, mode, model, model_params_json, execution_policy_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ),
     runById: database.prepare(`SELECT ${RUN_COLUMNS} FROM runs WHERE id = ?`),
     runsForSession: database.prepare(
@@ -190,6 +273,51 @@ export function createState(database: SqliteDatabase) {
     runEventsAfter: database.prepare(
       "SELECT sequence, event_json FROM run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence",
     ),
+    capabilityCache: database.prepare(
+      "SELECT payload_json, fetched_at FROM capability_cache WHERE key = 'cursor_models'",
+    ),
+    upsertCapabilityCache: database.prepare(
+      "INSERT INTO capability_cache (key, payload_json, fetched_at) VALUES ('cursor_models', ?, ?) ON CONFLICT(key) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at",
+    ),
+    operationById: database.prepare(
+      `SELECT ${OPERATION_COLUMNS} FROM operations WHERE id = ?`,
+    ),
+    operations: database.prepare(
+      `SELECT ${OPERATION_COLUMNS} FROM operations
+       WHERE (? IS NULL OR project_id = ?)
+         AND (? IS NULL OR workspace_id = ?)
+         AND (? = 1 OR terminal_outcome IS NULL OR terminal_outcome = 'needs_attention')
+       ORDER BY created_at, rowid`,
+    ),
+    recoverableOperations: database.prepare(
+      `SELECT ${OPERATION_COLUMNS} FROM operations
+       WHERE terminal_outcome IS NULL OR terminal_outcome = 'needs_attention'
+       ORDER BY created_at, rowid`,
+    ),
+    insertOperation: database.prepare(
+      `INSERT INTO operations (
+        schema_version, id, type, project_id, workspace_id, requested_json, phase,
+        branch_outcome, created_at, updated_at, last_recovery_at,
+        recovery_attempt_count, terminal_outcome, terminal_at,
+        compensation_outcome, diagnostic_json
+      ) VALUES (1, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 0, NULL, NULL, 'not_required', NULL)`,
+    ),
+    updateOperationInputs: database.prepare(
+      "UPDATE operations SET requested_json = ?, updated_at = ? WHERE id = ? AND terminal_outcome IS NULL",
+    ),
+    advanceOperation: database.prepare(
+      `UPDATE operations SET phase = ?, branch_outcome = COALESCE(?, branch_outcome),
+        updated_at = ?, terminal_outcome = NULL, terminal_at = NULL, diagnostic_json = NULL
+       WHERE id = ? AND phase = ?`,
+    ),
+    recordRecoveryAttempt: database.prepare(
+      `UPDATE operations SET recovery_attempt_count = recovery_attempt_count + 1,
+        last_recovery_at = ?, updated_at = ? WHERE id = ?`,
+    ),
+    finishOperation: database.prepare(
+      `UPDATE operations SET terminal_outcome = ?, terminal_at = ?, updated_at = ?,
+        compensation_outcome = ?, diagnostic_json = ? WHERE id = ?`,
+    ),
   };
 
   const insertSessionAndRun = database.transaction(
@@ -199,7 +327,9 @@ export function createState(database: SqliteDatabase) {
         sessionValue.workspaceId,
         sessionValue.cursorAgentId,
         sessionValue.mode,
-        sessionValue.model,
+        sessionValue.model.id,
+        JSON.stringify(sessionValue.model.params),
+        JSON.stringify(sessionValue.executionPolicy),
         sessionValue.createdAt,
       );
       statements.insertRun.run(
@@ -208,6 +338,54 @@ export function createState(database: SqliteDatabase) {
         prompt,
         runValue.createdAt,
       );
+    },
+  );
+
+  const insertWorkspaceAndAdvanceOperation = database.transaction(
+    (
+      value: Workspace,
+      operationId: string,
+      expectedPhase: WorkspaceOperationPhase,
+      nextPhase: WorkspaceOperationPhase,
+      updatedAt: number,
+    ) => {
+      statements.insertWorkspace.run(
+        value.id,
+        value.projectId,
+        value.worktreePath,
+        value.branch,
+        value.slug,
+        value.baseRef,
+        value.createdAt,
+      );
+      const result = statements.advanceOperation.run(
+        nextPhase,
+        null,
+        updatedAt,
+        operationId,
+        expectedPhase,
+      );
+      if (result.changes !== 1) throw new Error("operation phase conflict");
+    },
+  );
+
+  const archiveWorkspaceAndAdvanceOperation = database.transaction(
+    (
+      workspaceId: string,
+      archivedAt: number,
+      operationId: string,
+      expectedPhase: WorkspaceOperationPhase,
+      nextPhase: WorkspaceOperationPhase,
+    ) => {
+      statements.archiveWorkspace.run(archivedAt, workspaceId);
+      const result = statements.advanceOperation.run(
+        nextPhase,
+        null,
+        archivedAt,
+        operationId,
+        expectedPhase,
+      );
+      if (result.changes !== 1) throw new Error("operation phase conflict");
     },
   );
 
@@ -281,7 +459,9 @@ export function createState(database: SqliteDatabase) {
         value.workspaceId,
         value.cursorAgentId,
         value.mode,
-        value.model,
+        value.model.id,
+        JSON.stringify(value.model.params),
+        JSON.stringify(value.executionPolicy),
         value.createdAt,
       );
     },
@@ -364,6 +544,134 @@ export function createState(database: SqliteDatabase) {
     },
     listRunEventsAfter(runId: string, sequence: number): RunEventRow[] {
       return statements.runEventsAfter.all(runId, sequence) as RunEventRow[];
+    },
+    getCapabilityCache():
+      { payloadJson: string; fetchedAt: number } | undefined {
+      const row = statements.capabilityCache.get() as
+        CapabilityCacheRow | undefined;
+      return (
+        row && { payloadJson: row.payload_json, fetchedAt: row.fetched_at }
+      );
+    },
+    putCapabilityCache(models: unknown, fetchedAt: number): void {
+      statements.upsertCapabilityCache.run(JSON.stringify(models), fetchedAt);
+    },
+    getOperation(id: string): WorkspaceOperation | undefined {
+      const row = statements.operationById.get(id) as OperationRow | undefined;
+      return row && operation(row);
+    },
+    listOperations(input: {
+      projectId?: string;
+      workspaceId?: string;
+      includeCompleted?: boolean;
+    }): WorkspaceOperation[] {
+      const projectId = input.projectId ?? null;
+      const workspaceId = input.workspaceId ?? null;
+      return (
+        statements.operations.all(
+          projectId,
+          projectId,
+          workspaceId,
+          workspaceId,
+          input.includeCompleted ? 1 : 0,
+        ) as OperationRow[]
+      ).map(operation);
+    },
+    listRecoverableOperations(): WorkspaceOperation[] {
+      return (statements.recoverableOperations.all() as OperationRow[]).map(
+        operation,
+      );
+    },
+    insertOperation(value: WorkspaceOperation): void {
+      statements.insertOperation.run(
+        value.id,
+        value.type,
+        value.projectId,
+        value.workspaceId,
+        JSON.stringify(value.requestedInputs),
+        value.phase,
+        value.createdAt,
+        value.updatedAt,
+      );
+    },
+    updateOperationInputs(
+      id: string,
+      requestedInputs: WorkspaceOperation["requestedInputs"],
+      updatedAt: number,
+    ): boolean {
+      return (
+        statements.updateOperationInputs.run(
+          JSON.stringify(requestedInputs),
+          updatedAt,
+          id,
+        ).changes === 1
+      );
+    },
+    advanceOperation(
+      id: string,
+      expectedPhase: WorkspaceOperationPhase,
+      nextPhase: WorkspaceOperationPhase,
+      updatedAt: number,
+      branchOutcome?: WorkspaceOperationBranchOutcome,
+    ): boolean {
+      return (
+        statements.advanceOperation.run(
+          nextPhase,
+          branchOutcome ?? null,
+          updatedAt,
+          id,
+          expectedPhase,
+        ).changes === 1
+      );
+    },
+    insertWorkspaceAndAdvanceOperation(
+      value: Workspace,
+      operationId: string,
+      expectedPhase: WorkspaceOperationPhase,
+      nextPhase: WorkspaceOperationPhase,
+      updatedAt: number,
+    ): void {
+      insertWorkspaceAndAdvanceOperation(
+        value,
+        operationId,
+        expectedPhase,
+        nextPhase,
+        updatedAt,
+      );
+    },
+    archiveWorkspaceAndAdvanceOperation(
+      workspaceId: string,
+      archivedAt: number,
+      operationId: string,
+      expectedPhase: WorkspaceOperationPhase,
+      nextPhase: WorkspaceOperationPhase,
+    ): void {
+      archiveWorkspaceAndAdvanceOperation(
+        workspaceId,
+        archivedAt,
+        operationId,
+        expectedPhase,
+        nextPhase,
+      );
+    },
+    recordRecoveryAttempt(id: string, attemptedAt: number): void {
+      statements.recordRecoveryAttempt.run(attemptedAt, attemptedAt, id);
+    },
+    finishOperation(
+      id: string,
+      outcome: WorkspaceOperationTerminalOutcome,
+      compensation: WorkspaceOperationCompensationOutcome,
+      diagnostic: WorkspaceOperationDiagnostic | null,
+      finishedAt: number,
+    ): void {
+      statements.finishOperation.run(
+        outcome,
+        finishedAt,
+        finishedAt,
+        compensation,
+        diagnostic === null ? null : JSON.stringify(diagnostic),
+        id,
+      );
     },
   };
 }

@@ -36,7 +36,9 @@ export type RepositoryLeaseOwner = {
   schemaVersion: 1;
   leaseId: string;
   repositoryIdentity: string;
-  operation: "create_worktree" | "archive_worktree";
+  operation:
+    "create_worktree" | "archive_worktree" | "recover_workspace_operation";
+  operationId?: string;
   pid: number;
   hostname: string;
   processStartFingerprint: string;
@@ -58,6 +60,7 @@ export type CreateWorktreeInput = {
   branch: string;
   baseRef: string;
   copyGlobs?: string[];
+  operationId?: string;
 };
 
 export type ArchiveWorktreeInput = {
@@ -65,7 +68,58 @@ export type ArchiveWorktreeInput = {
   worktreePath: string;
   branch: string;
   keepBranch?: boolean;
+  operationId?: string;
 };
+
+export type WorkspaceOperationStepInput =
+  | {
+      operationId: string;
+      type: "create_workspace";
+      target: "git_worktree_created" | "create_compensated";
+      repoRoot: string;
+      worktreePath: string;
+      slug: string;
+      branch: string;
+      baseRef: string;
+      copyGlobs?: string[];
+    }
+  | {
+      operationId: string;
+      type: "archive_workspace";
+      target: "git_worktree_removed" | "branch_outcome_recorded";
+      repoRoot: string;
+      worktreePath: string;
+      branch: string;
+      keepBranch: boolean;
+      expectedHead?: string | null;
+    };
+
+export type WorkspaceOperationAttentionReason =
+  | "operation_marker_missing"
+  | "operation_marker_invalid"
+  | "operation_identity_mismatch"
+  | "repository_identity_mismatch"
+  | "duplicate_canonical_path"
+  | "path_exists_outside_snapshot"
+  | "worktree_missing"
+  | "worktree_mismatch"
+  | "branch_changed"
+  | "unsupported_bare_worktree";
+
+export type WorkspaceOperationStepResult =
+  | {
+      state: "advanced";
+      repositoryIdentity: string;
+      worktreePath: string;
+      expectedHead: string | null;
+      branchOutcome?: "kept" | "deleted" | "already_absent";
+    }
+  | {
+      state: "needs_attention";
+      reason: WorkspaceOperationAttentionReason;
+      repositoryIdentity: string;
+      observed?: Readonly<Record<string, unknown>>;
+    };
 
 export type WattJson = {
   copy?: string[];
@@ -77,6 +131,9 @@ export type GitService = {
   inspectRepository: (repoRoot: string) => Promise<RepositorySnapshot>;
   listWorktrees: (repoRoot: string) => Promise<GitWorktree[]>;
   archiveWorktree: (input: ArchiveWorktreeInput) => Promise<void>;
+  advanceWorkspaceOperation: (
+    input: WorkspaceOperationStepInput,
+  ) => Promise<WorkspaceOperationStepResult>;
 };
 
 export type CreateGitOptions = {

@@ -1,9 +1,16 @@
 export { createHost } from "./create-host.js";
-export { HostError, isHostError } from "./errors.js";
+export {
+  HostError,
+  isHostError,
+  isWattBoundaryError,
+  type WattBoundaryError,
+} from "./errors.js";
 export type {
   CreateHostOptions,
   Host,
   HostEvent,
+  HostCapabilities,
+  ModelCatalogState,
   Project,
   ProjectReconciliation,
   ReconciliationEntry,
@@ -13,4 +20,11 @@ export type {
   RunStatus,
   Session,
   Workspace,
+  WorkspaceOperation,
+  WorkspaceOperationBranchOutcome,
+  WorkspaceOperationCompensationOutcome,
+  WorkspaceOperationDiagnostic,
+  WorkspaceOperationPhase,
+  WorkspaceOperationTerminalOutcome,
+  WorkspaceOperationType,
 } from "./types.js";

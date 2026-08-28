@@ -13,4 +13,7 @@ export type {
   RepositoryLeaseOwner,
   RepositorySnapshot,
   WattJson,
+  WorkspaceOperationAttentionReason,
+  WorkspaceOperationStepInput,
+  WorkspaceOperationStepResult,
 } from "./types.js";

@@ -1,8 +1,11 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import {
+  access,
   link,
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rm,
   writeFile,
@@ -20,6 +23,18 @@ import { createHost } from "./create-host.js";
 import { migrate } from "./migrate.js";
 
 const execFileAsync = promisify(execFile);
+
+function fakeModels() {
+  return [
+    {
+      id: "composer-2.5",
+      displayName: "Composer 2.5",
+      aliases: [],
+      parameters: [],
+      variants: [{ displayName: "Default", params: [], isDefault: true }],
+    },
+  ];
+}
 
 async function gitCommand(cwd: string, args: string[]): Promise<void> {
   await execFileAsync("git", args, { cwd });
@@ -48,11 +63,13 @@ async function initGitRepo(root: string): Promise<string> {
 function fakeGit(): GitService & { created: string[]; archived: string[] } {
   const created: string[] = [];
   const archived: string[] = [];
+  const branches = new Map<string, string>();
   return {
     created,
     archived,
     async createWorktree(input) {
       created.push(input.worktreePath);
+      branches.set(input.worktreePath, input.branch);
       await mkdir(input.worktreePath, { recursive: true });
       await writeFile(path.join(input.worktreePath, ".keep"), "");
       return {
@@ -66,11 +83,64 @@ function fakeGit(): GitService & { created: string[]; archived: string[] } {
     async listWorktrees() {
       throw new Error("listWorktrees must not be used by host.list");
     },
-    async inspectRepository() {
-      throw new Error("inspectRepository must not be used by host.list");
+    async inspectRepository(repoRoot) {
+      return {
+        repositoryIdentity: "/fake/repository",
+        repoRoot,
+        inspectedAt: Date.now(),
+        worktrees: [...branches].map(([worktreePath, branch]) => ({
+          path: worktreePath,
+          pathExists: true,
+          head: "fake-head",
+          branch,
+          detached: false,
+          bare: false,
+          locked: null,
+          prunable: null,
+        })),
+      };
     },
     async archiveWorktree(input) {
       archived.push(input.worktreePath);
+      branches.delete(input.worktreePath);
+    },
+    async advanceWorkspaceOperation(input) {
+      if (input.type === "create_workspace") {
+        if (input.target === "create_compensated") {
+          archived.push(input.worktreePath);
+          branches.delete(input.worktreePath);
+          await rm(input.worktreePath, { recursive: true, force: true });
+        } else {
+          created.push(input.worktreePath);
+          branches.set(input.worktreePath, input.branch);
+          await mkdir(input.worktreePath, { recursive: true });
+          await writeFile(path.join(input.worktreePath, ".keep"), "");
+        }
+        return {
+          state: "advanced",
+          repositoryIdentity: "/fake/repository",
+          worktreePath: input.worktreePath,
+          expectedHead: "fake-head",
+        };
+      }
+      if (input.target === "git_worktree_removed") {
+        archived.push(input.worktreePath);
+        branches.delete(input.worktreePath);
+        await rm(input.worktreePath, { recursive: true, force: true });
+        return {
+          state: "advanced",
+          repositoryIdentity: "/fake/repository",
+          worktreePath: input.worktreePath,
+          expectedHead: "fake-head",
+        };
+      }
+      return {
+        state: "advanced",
+        repositoryIdentity: "/fake/repository",
+        worktreePath: input.worktreePath,
+        expectedHead: "fake-head",
+        branchOutcome: input.keepBranch ? "kept" : "deleted",
+      };
     },
   };
 }
@@ -105,6 +175,9 @@ function fakeAgent(): WattAgent & {
   return {
     resumes,
     idempotencyKeys,
+    async listModels() {
+      return fakeModels();
+    },
     async create() {
       return {
         cursorAgentId: "cursor-agent-1",
@@ -205,6 +278,9 @@ function controlledAgent(): WattAgent & {
   return {
     starts,
     recovered,
+    async listModels() {
+      return fakeModels();
+    },
     async create() {
       return handle(`controlled-agent-${++cursorAgentNumber}`);
     },
@@ -280,6 +356,67 @@ describe("createHost", () => {
     await host.close();
   });
 
+  it("prevents separate CLI- and sidecar-shaped processes from sharing recovery ownership", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-process-lease-"));
+    const stateDir = path.join(root, "state");
+    const owners = path.join(stateDir, ".watt-locks", "owners");
+    await mkdir(owners, { recursive: true });
+    const child = spawn(
+      process.execPath,
+      [
+        "-e",
+        "process.stdout.write(String(process.pid)); setInterval(() => {}, 1000)",
+      ],
+      { stdio: ["ignore", "pipe", "ignore"] },
+    );
+    const [pidChunk] = (await once(child.stdout!, "data")) as [Buffer];
+    const pid = Number(pidChunk.toString());
+    let fingerprint: string;
+    if (process.platform === "linux") {
+      const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      fingerprint = `linux:${fields[19]}`;
+    } else {
+      const result = await execFileAsync("ps", [
+        "-o",
+        "lstart=",
+        "-p",
+        String(pid),
+      ]);
+      fingerprint = `${process.platform}:${result.stdout.trim()}`;
+    }
+    const leaseId = "live-sidecar-owner";
+    const ownerPath = path.join(owners, `${leaseId}.json`);
+    await writeFile(
+      ownerPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        leaseId,
+        stateDir,
+        pid,
+        hostname: hostname(),
+        processStartFingerprint: fingerprint,
+        acquiredAt: Date.now(),
+      })}\n`,
+    );
+    await link(ownerPath, path.join(stateDir, ".watt-locks", "host.lock"));
+
+    try {
+      await expect(
+        createHost({
+          stateDir,
+          worktreeRoot: path.join(root, "trees"),
+          leaseTimeoutMs: 25,
+          git: fakeGit(),
+          agent: fakeAgent(),
+        }),
+      ).rejects.toMatchObject({ code: "host_busy" });
+    } finally {
+      child.kill("SIGTERM");
+      await once(child, "exit");
+    }
+  });
+
   it("migrates the unversioned schema in place without losing rows", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "watt-host-"));
     const database = new Database(path.join(root, "watt.sqlite"));
@@ -290,7 +427,7 @@ describe("createHost", () => {
       INSERT INTO sessions VALUES ('session', 'workspace', 'cursor-session', 'agent', 'composer-2.5', 3);
     `);
     migrate(database);
-    expect(database.pragma("user_version", { simple: true })).toBe(2);
+    expect(database.pragma("user_version", { simple: true })).toBe(4);
     expect(database.pragma("journal_mode", { simple: true })).toBe("wal");
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(database.pragma("busy_timeout", { simple: true })).toBe(5000);
@@ -307,6 +444,12 @@ describe("createHost", () => {
     const runIndexes = database.pragma("index_list(runs)") as Array<{
       name: string;
       unique: number;
+      partial: number;
+    }>;
+    const operationIndexes = database.pragma(
+      "index_list(operations)",
+    ) as Array<{
+      name: string;
       partial: number;
     }>;
     expect(workspaceIndexes).toEqual(
@@ -334,12 +477,54 @@ describe("createHost", () => {
         }),
       ]),
     );
+    expect(operationIndexes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "operations_project_history" }),
+        expect.objectContaining({ name: "operations_workspace_history" }),
+        expect.objectContaining({ name: "operations_recovery", partial: 1 }),
+      ]),
+    );
+    expect(() =>
+      database
+        .prepare(
+          `INSERT INTO operations (
+            schema_version, id, type, project_id, workspace_id,
+            requested_json, phase, created_at, updated_at
+          ) VALUES (1, 'invalid-operation', 'create_workspace', 'project',
+            'workspace', '{}', 'active_runs_handled', 4, 4)`,
+        )
+        .run(),
+    ).toThrow();
     expect(
       database.prepare("SELECT COUNT(*) AS count FROM workspaces").get(),
     ).toEqual({ count: 1 });
     expect(
       database.prepare("SELECT COUNT(*) AS count FROM sessions").get(),
     ).toEqual({ count: 1 });
+    const migratedSession = database
+      .prepare(
+        "SELECT model_params_json, execution_policy_json FROM sessions WHERE id = 'session'",
+      )
+      .get() as {
+      model_params_json: string;
+      execution_policy_json: string;
+    };
+    expect(JSON.parse(migratedSession.model_params_json)).toEqual([]);
+    expect(JSON.parse(migratedSession.execution_policy_json)).toEqual({
+      autoReview: false,
+      sandbox: { enabled: false },
+      agentRetries: true,
+      toolAllowlist: null,
+      toolDenylist: [],
+      settingSources: ["project", "user", "plugins"],
+    });
+    expect(
+      database
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'capability_cache'",
+        )
+        .get(),
+    ).toEqual({ name: "capability_cache" });
     database.close();
   });
 
@@ -379,7 +564,7 @@ describe("createHost", () => {
 
     migrate(database);
 
-    expect(database.pragma("user_version", { simple: true })).toBe(2);
+    expect(database.pragma("user_version", { simple: true })).toBe(4);
     expect(
       database.prepare("SELECT COUNT(*) AS count FROM sessions").get(),
     ).toEqual({ count: 1 });
@@ -545,6 +730,259 @@ describe("createHost", () => {
     await host.close();
   });
 
+  it("surfaces completed operation history without adding it to cached workspace reads", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-diagnostics-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const git = fakeGit();
+    const host = await createHost({
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git,
+      agent: fakeAgent(),
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "diagnostics",
+    });
+
+    expect(host.diagnostics.operations.list({ projectId: project.id })).toEqual(
+      [],
+    );
+    const completed = host.diagnostics.operations.list({
+      projectId: project.id,
+      includeCompleted: true,
+    });
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({
+      type: "create_workspace",
+      workspaceId: workspace.id,
+      phase: "operation_completed",
+      terminalOutcome: "succeeded",
+    });
+    expect(
+      host.diagnostics.operations.get({ operationId: completed[0]!.id }),
+    ).toEqual(completed[0]);
+    expect(git.created).toHaveLength(1);
+    expect(host.workspaces.list({ projectId: project.id })).toEqual([
+      workspace,
+    ]);
+    expect(git.created).toHaveLength(1);
+    await host.close();
+  });
+
+  it("recovers rewound create and archive phases idempotently on startup", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "watt-host-operation-recovery-"),
+    );
+    const repo = await initGitRepo(root);
+    const stateDir = path.join(root, "state");
+    const worktreeRoot = path.join(root, "trees");
+    const git = createGit();
+    const agent = fakeAgent();
+    let host = await createHost({ stateDir, worktreeRoot, git, agent });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "recover-operation",
+    });
+    const createOperation = host.diagnostics.operations.list({
+      workspaceId: workspace.id,
+      includeCompleted: true,
+    })[0]!;
+    await host.close();
+
+    const createPhases = [
+      "intent_recorded",
+      "git_worktree_created",
+      "path_verified",
+      "workspace_row_committed",
+      "operation_completed",
+    ] as const;
+    for (const [index, phase] of createPhases.entries()) {
+      const database = new Database(path.join(stateDir, "watt.sqlite"));
+      database.pragma("foreign_keys = ON");
+      if (
+        phase === "intent_recorded" ||
+        phase === "git_worktree_created" ||
+        phase === "path_verified"
+      ) {
+        database
+          .prepare("DELETE FROM workspaces WHERE id = ?")
+          .run(workspace.id);
+      }
+      database
+        .prepare(
+          "UPDATE operations SET phase = ?, terminal_outcome = NULL, terminal_at = NULL WHERE id = ?",
+        )
+        .run(phase, createOperation.id);
+      database.close();
+
+      host = await createHost({ stateDir, worktreeRoot, git, agent });
+      expect(host.workspaces.get(workspace.id)).toMatchObject({
+        archivedAt: null,
+      });
+      expect(
+        host.diagnostics.operations.get({ operationId: createOperation.id }),
+      ).toMatchObject({
+        phase: "operation_completed",
+        terminalOutcome: "succeeded",
+        recoveryAttemptCount: index + 1,
+      });
+      if (index < createPhases.length - 1) await host.close();
+    }
+    await host.workspaces.archive({ workspaceId: workspace.id });
+    const archiveOperation = host.diagnostics.operations
+      .list({ workspaceId: workspace.id, includeCompleted: true })
+      .find((operation) => operation.type === "archive_workspace")!;
+    await host.close();
+    const archivePhases = [
+      "intent_recorded",
+      "active_runs_handled",
+      "git_worktree_removed",
+      "branch_outcome_recorded",
+      "workspace_archived",
+    ] as const;
+    for (const [index, phase] of archivePhases.entries()) {
+      const database = new Database(path.join(stateDir, "watt.sqlite"));
+      if (phase !== "workspace_archived") {
+        database
+          .prepare("UPDATE workspaces SET archived_at = NULL WHERE id = ?")
+          .run(workspace.id);
+      }
+      database
+        .prepare(
+          "UPDATE operations SET phase = ?, terminal_outcome = NULL, terminal_at = NULL WHERE id = ?",
+        )
+        .run(phase, archiveOperation.id);
+      database.close();
+
+      host = await createHost({ stateDir, worktreeRoot, git, agent });
+      expect(host.workspaces.get(workspace.id)).toMatchObject({
+        archivedAt: expect.any(Number),
+      });
+      expect(
+        host.diagnostics.operations.get({ operationId: archiveOperation.id }),
+      ).toMatchObject({
+        phase: "workspace_archived",
+        terminalOutcome: "succeeded",
+        recoveryAttemptCount: index + 1,
+      });
+      await host.close();
+    }
+    host = await createHost({ stateDir, worktreeRoot, git, agent });
+    expect(
+      host.diagnostics.operations.get({ operationId: archiveOperation.id }),
+    ).toMatchObject({ recoveryAttemptCount: 5, terminalOutcome: "succeeded" });
+    await host.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("marks mismatched recovery as needs_attention without deleting Git state", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "watt-host-operation-attention-"),
+    );
+    const repo = await initGitRepo(root);
+    const stateDir = path.join(root, "state");
+    const worktreeRoot = path.join(root, "trees");
+    const git = createGit();
+    const agent = fakeAgent();
+    let host = await createHost({ stateDir, worktreeRoot, git, agent });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "attention",
+    });
+    const operation = host.diagnostics.operations.list({
+      workspaceId: workspace.id,
+      includeCompleted: true,
+    })[0]!;
+    await host.close();
+    await gitCommand(workspace.worktreePath, [
+      "switch",
+      "-c",
+      "manual/attention",
+    ]);
+
+    const database = new Database(path.join(stateDir, "watt.sqlite"));
+    database.pragma("foreign_keys = ON");
+    database.prepare("DELETE FROM workspaces WHERE id = ?").run(workspace.id);
+    database
+      .prepare(
+        "UPDATE operations SET phase = 'git_worktree_created', terminal_outcome = NULL, terminal_at = NULL WHERE id = ?",
+      )
+      .run(operation.id);
+    database.close();
+
+    host = await createHost({ stateDir, worktreeRoot, git, agent });
+    expect(
+      host.diagnostics.operations.get({ operationId: operation.id }),
+    ).toMatchObject({
+      terminalOutcome: "needs_attention",
+      compensationOutcome: "unsafe",
+    });
+    expect(host.workspaces.get(workspace.id)).toBeUndefined();
+    await access(workspace.worktreePath);
+    expect((await git.listWorktrees(repo))[1]).toMatchObject({
+      branch: "manual/attention",
+    });
+    await host.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("revalidates Git identity after a persisted path_verified create phase", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "watt-host-path-verified-drift-"),
+    );
+    const repo = await initGitRepo(root);
+    const stateDir = path.join(root, "state");
+    const worktreeRoot = path.join(root, "trees");
+    const git = createGit();
+    const agent = fakeAgent();
+    let host = await createHost({ stateDir, worktreeRoot, git, agent });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "path-verified-drift",
+    });
+    const operation = host.diagnostics.operations.list({
+      workspaceId: workspace.id,
+      includeCompleted: true,
+    })[0]!;
+    await host.close();
+
+    await gitCommand(workspace.worktreePath, [
+      "switch",
+      "-c",
+      "manual/path-verified-drift",
+    ]);
+    const database = new Database(path.join(stateDir, "watt.sqlite"));
+    database.pragma("foreign_keys = ON");
+    database.prepare("DELETE FROM workspaces WHERE id = ?").run(workspace.id);
+    database
+      .prepare(
+        "UPDATE operations SET phase = 'path_verified', terminal_outcome = NULL, terminal_at = NULL WHERE id = ?",
+      )
+      .run(operation.id);
+    database.close();
+
+    host = await createHost({ stateDir, worktreeRoot, git, agent });
+    expect(host.workspaces.get(workspace.id)).toBeUndefined();
+    expect(
+      host.diagnostics.operations.get({ operationId: operation.id }),
+    ).toMatchObject({
+      terminalOutcome: "needs_attention",
+      compensationOutcome: "unsafe",
+      diagnostic: { code: "worktree_mismatch" },
+    });
+    expect((await git.listWorktrees(repo))[1]).toMatchObject({
+      branch: "manual/path-verified-drift",
+    });
+    await host.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
   it("serializes sends per session and supports replay cursors and queued cancellation", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "watt-host-runs-"));
     const repo = path.join(root, "repo");
@@ -615,6 +1053,50 @@ describe("createHost", () => {
     await expect(
       host.runs.wait({ runId: second.run.id }),
     ).resolves.toMatchObject({ status: "finished" });
+    await host.close();
+  });
+
+  it("aborts an idle run attachment without cancelling the run", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-attach-abort-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const agent = controlledAgent();
+    const host = await createHost({
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent,
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "abort-attach",
+    });
+    const created = await host.sessions.create({
+      workspaceId: workspace.id,
+      prompt: "still-running",
+    });
+    await vi.waitFor(() => expect(agent.starts).toHaveLength(1));
+
+    const controller = new AbortController();
+    const iterator = host.runs
+      .attach({
+        runId: created.run.id,
+        afterSequence: 1,
+        signal: controller.signal,
+      })
+      [Symbol.asyncIterator]();
+    const pending = iterator.next();
+    controller.abort();
+
+    await expect(pending).resolves.toEqual({ done: true, value: undefined });
+    expect(host.runs.get(created.run.id)?.status).toBe("running");
+    agent.starts[0]?.run.finish();
+    await expect(
+      host.runs.wait({ runId: created.run.id }),
+    ).resolves.toMatchObject({
+      status: "finished",
+    });
     await host.close();
   });
 
@@ -834,6 +1316,7 @@ describe("createHost", () => {
       slug: "archived",
     });
     await host.workspaces.archive({ workspaceId: archived.id });
+    inspections = 0;
 
     await gitCommand(mismatched.worktreePath, [
       "switch",
@@ -855,12 +1338,13 @@ describe("createHost", () => {
     const canonicalMovedPath = await realpath(movedPath);
     const canonicalUntrackedPath = await realpath(untrackedPath);
 
+    const setupInspections = inspections;
     const cachedBefore = host.workspaces.list({ projectId: project.id });
-    expect(inspections).toBe(0);
+    expect(inspections).toBe(setupInspections);
     const beforePrune = await host.projects.reconcile({
       projectId: project.id,
     });
-    expect(inspections).toBe(1);
+    expect(inspections).toBe(setupInspections + 1);
     expect(beforePrune.entries).toContainEqual(
       expect.objectContaining({
         state: "missing",
@@ -870,7 +1354,7 @@ describe("createHost", () => {
 
     await gitCommand(repo, ["worktree", "prune", "--expire", "now"]);
     const report = await host.projects.reconcile({ projectId: project.id });
-    expect(inspections).toBe(2);
+    expect(inspections).toBe(setupInspections + 2);
     expect(report.repositoryIdentity).toBeTruthy();
     expect(report.entries).toEqual(
       expect.arrayContaining([
@@ -907,7 +1391,7 @@ describe("createHost", () => {
     expect(host.workspaces.list({ projectId: project.id })).toEqual(
       cachedBefore,
     );
-    expect(inspections).toBe(2);
+    expect(inspections).toBe(setupInspections + 2);
     await host.close();
     await rm(root, { recursive: true, force: true });
   });
@@ -936,5 +1420,362 @@ describe("createHost", () => {
     });
     await host.close();
     await rm(root, { recursive: true, force: true });
+  });
+
+  it("persists structured model, Plan mode, and effective policy across resume", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-policy-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const agent = fakeAgent();
+    const createSpy = vi.spyOn(agent, "create");
+    const resumeSpy = vi.spyOn(agent, "resume");
+    const trustedTool = {
+      name: "trusted_tool",
+      description: "trusted construction-time tool",
+      execute: () => ({ ok: true }),
+    };
+    const options = {
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent,
+      executionPolicy: { toolDenylist: ["delete"] },
+      customTools: [trustedTool],
+    };
+    const host = await createHost(options);
+    const capabilities = await host.capabilities();
+    expect(capabilities).toMatchObject({
+      runtime: "cursor-local",
+      modes: ["agent", "plan"],
+      modelCatalog: { status: "live" },
+      executionPolicy: {
+        defaults: {
+          autoReview: false,
+          sandbox: { enabled: false },
+          agentRetries: true,
+          toolAllowlist: null,
+          toolDenylist: ["delete"],
+          settingSources: ["project", "user", "plugins"],
+        },
+      },
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "policy",
+    });
+    const created = await host.sessions.create({
+      workspaceId: workspace.id,
+      prompt: "plan it",
+      mode: "plan",
+      executionPolicy: {
+        toolAllowlist: ["read", "mcp"],
+        toolDenylist: ["shell"],
+      },
+    });
+    expect(created.session).toMatchObject({
+      mode: "plan",
+      model: { id: "composer-2.5", params: [] },
+      executionPolicy: {
+        autoReview: false,
+        sandbox: { enabled: false },
+        agentRetries: true,
+        toolAllowlist: ["read", "mcp"],
+        toolDenylist: ["shell"],
+      },
+    });
+    expect(createSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "plan",
+        model: { id: "composer-2.5", params: [] },
+        executionPolicy: created.session.executionPolicy,
+        customTools: [trustedTool],
+      }),
+    );
+    await host.runs.wait({ runId: created.run.id });
+    await host.close();
+
+    const reopened = await createHost(options);
+    const sent = await reopened.sessions.send({
+      sessionId: created.session.id,
+      prompt: "continue",
+    });
+    await reopened.runs.wait({ runId: sent.run.id });
+    expect(resumeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "plan",
+        model: { id: "composer-2.5", params: [] },
+        executionPolicy: created.session.executionPolicy,
+        customTools: [trustedTool],
+      }),
+    );
+    expect(reopened.sessions.get(created.session.id)).toEqual(created.session);
+    await reopened.close();
+  });
+
+  it("rejects duplicate or builtin custom tools at Host construction", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-tools-"));
+    const base = {
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent: fakeAgent(),
+    };
+    const tool = {
+      name: "duplicate",
+      description: "duplicate",
+      execute: () => "ok",
+    };
+    await expect(
+      createHost({ ...base, customTools: [tool, tool] }),
+    ).rejects.toMatchObject({ code: "invalid_options" });
+    await expect(
+      createHost({
+        ...base,
+        customTools: [
+          {
+            ...tool,
+            name: "watt_workspace_info",
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_options" });
+  });
+
+  it("persists and replays structured custom-tool results without flattening", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-tool-results-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const agent = fakeAgent();
+    const structuredResult = {
+      content: [{ type: "text", text: "tool failed" }],
+      structuredContent: { reason: "expected" },
+      isError: true,
+    };
+    vi.spyOn(agent, "create").mockResolvedValue({
+      cursorAgentId: "structured-agent",
+      async send() {
+        return {
+          cursorRunId: "structured-run",
+          async *stream() {
+            yield {
+              type: "tool_result" as const,
+              callId: "call-1",
+              name: "trusted_tool",
+              result: structuredResult,
+              ok: false,
+            };
+          },
+          wait: async () => ({ status: "finished" as const }),
+          cancel: async () => undefined,
+        };
+      },
+    });
+    const options = {
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent,
+    };
+    const host = await createHost(options);
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "tool-results",
+    });
+    const created = await host.sessions.create({
+      workspaceId: workspace.id,
+      prompt: "use tool",
+    });
+    const liveEvents = [];
+    for await (const event of host.runs.attach({ runId: created.run.id })) {
+      liveEvents.push(event);
+    }
+    expect(liveEvents).toContainEqual(
+      expect.objectContaining({
+        type: "tool_result",
+        result: structuredResult,
+        ok: false,
+      }),
+    );
+    await host.close();
+
+    const reopened = await createHost(options);
+    const replayed = [];
+    for await (const event of reopened.runs.attach({ runId: created.run.id })) {
+      replayed.push(event);
+    }
+    expect(replayed).toEqual(liveEvents);
+    await reopened.close();
+  });
+
+  it("uses the persisted model catalog on discovery failure and fails closed without one", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-catalog-"));
+    const agent = fakeAgent();
+    const options = {
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent,
+    };
+    const host = await createHost(options);
+    const live = await host.capabilities();
+    expect(live.modelCatalog.status).toBe("live");
+    await host.close();
+
+    vi.spyOn(agent, "listModels").mockRejectedValue(new Error("offline"));
+    const cachedHost = await createHost(options);
+    await expect(cachedHost.capabilities()).resolves.toMatchObject({
+      models: [expect.objectContaining({ id: "composer-2.5" })],
+      modelCatalog: {
+        status: "cached",
+        fetchedAt: live.modelCatalog.fetchedAt,
+        error: { message: "offline" },
+      },
+    });
+    await cachedHost.close();
+
+    const emptyRoot = await mkdtemp(
+      path.join(tmpdir(), "watt-host-no-catalog-"),
+    );
+    const unavailable = await createHost({
+      stateDir: path.join(emptyRoot, "state"),
+      worktreeRoot: path.join(emptyRoot, "trees"),
+      git: fakeGit(),
+      agent,
+    });
+    await expect(unavailable.capabilities()).resolves.toMatchObject({
+      models: [],
+      modelCatalog: { status: "unavailable", fetchedAt: null },
+    });
+    const repo = path.join(emptyRoot, "repo");
+    await mkdir(repo);
+    const project = await unavailable.projects.register(repo);
+    const workspace = await unavailable.workspaces.create({
+      projectId: project.id,
+      slug: "unavailable",
+    });
+    await expect(
+      unavailable.sessions.create({
+        workspaceId: workspace.id,
+        prompt: "blocked",
+      }),
+    ).rejects.toMatchObject({ code: "model_catalog_unavailable" });
+    await unavailable.close();
+  });
+
+  it("rejects unsupported selections and model disappearance before dispatch", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-models-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const agent = fakeAgent();
+    const models = vi.spyOn(agent, "listModels").mockResolvedValue([
+      {
+        id: "model-a",
+        displayName: "Model A",
+        aliases: ["a"],
+        parameters: [
+          {
+            id: "effort",
+            values: [{ value: "low" }, { value: "high" }],
+          },
+        ],
+        variants: [],
+      },
+    ]);
+    const createSpy = vi.spyOn(agent, "create");
+    const host = await createHost({
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent,
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "models",
+    });
+    await expect(
+      host.sessions.create({
+        workspaceId: workspace.id,
+        prompt: "bad",
+        model: { id: "a", params: [{ id: "effort", value: "medium" }] },
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_model_parameter" });
+    expect(createSpy).not.toHaveBeenCalled();
+
+    const created = await host.sessions.create({
+      workspaceId: workspace.id,
+      prompt: "good",
+      model: { id: "a", params: [{ id: "effort", value: "high" }] },
+    });
+    expect(created.session.model).toEqual({
+      id: "model-a",
+      params: [{ id: "effort", value: "high" }],
+    });
+    await host.runs.wait({ runId: created.run.id });
+    models.mockResolvedValue([
+      {
+        id: "model-b",
+        displayName: "Model B",
+        aliases: [],
+        parameters: [],
+        variants: [],
+      },
+    ]);
+    await expect(
+      host.sessions.send({ sessionId: created.session.id, prompt: "again" }),
+    ).rejects.toMatchObject({ code: "model_unavailable" });
+    await host.close();
+  });
+
+  it("fails a persisted queued follow-up without dispatch when its model disappears", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-queued-model-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const agent = controlledAgent();
+    const models = vi.spyOn(agent, "listModels");
+    const options = {
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent,
+    };
+    const host = await createHost(options);
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "queued-model",
+    });
+    const active = await host.sessions.create({
+      workspaceId: workspace.id,
+      prompt: "active",
+    });
+    await vi.waitFor(() => expect(agent.starts).toHaveLength(1));
+    const queued = await host.sessions.send({
+      sessionId: active.session.id,
+      prompt: "queued",
+    });
+    await host.close();
+    expect(agent.starts).toHaveLength(1);
+
+    models.mockResolvedValue([
+      {
+        id: "replacement",
+        displayName: "Replacement",
+        aliases: [],
+        parameters: [],
+        variants: [],
+      },
+    ]);
+    const reopened = await createHost(options);
+    await expect(
+      reopened.runs.wait({ runId: queued.run.id }),
+    ).resolves.toMatchObject({
+      status: "error",
+      error: { code: "model_unavailable" },
+    });
+    expect(agent.starts).toHaveLength(1);
+    await reopened.close();
   });
 });

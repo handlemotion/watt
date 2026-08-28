@@ -10,6 +10,32 @@ type GlobalOpts = {
   worktreeRoot?: string;
 };
 
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+function parseModelParams(
+  values: string[],
+): Array<{ id: string; value: string }> {
+  const seen = new Set<string>();
+  return values.map((entry) => {
+    const separator = entry.indexOf("=");
+    if (separator <= 0 || separator === entry.length - 1) {
+      throw new Error(`invalid --model-param: ${entry}; expected id=value`);
+    }
+    const id = entry.slice(0, separator);
+    if (seen.has(id)) throw new Error(`duplicate --model-param: ${id}`);
+    seen.add(id);
+    return { id, value: entry.slice(separator + 1) };
+  });
+}
+
+function parseMode(value: string | undefined): "agent" | "plan" {
+  if (value === undefined || value === "agent") return "agent";
+  if (value === "plan") return "plan";
+  throw new Error(`invalid --mode: ${value}; expected agent or plan`);
+}
+
 async function withHost<T>(
   opts: GlobalOpts,
   requireRepo: boolean,
@@ -108,14 +134,36 @@ export function createProgram(): Command {
     .requiredOption("--workspace <id>", "workspace id")
     .requiredOption("-p, --prompt <text>", "prompt")
     .option("--model <id>", "model id")
+    .option(
+      "--model-param <id=value>",
+      "selected model parameter (repeatable)",
+      collect,
+      [],
+    )
+    .option("--mode <agent|plan>", "conversation mode", "agent")
     .action(
-      async (flags: { workspace: string; prompt: string; model?: string }) => {
+      async (flags: {
+        workspace: string;
+        prompt: string;
+        model?: string;
+        modelParam: string[];
+        mode?: string;
+      }) => {
         const opts = program.opts<GlobalOpts>();
+        const params = parseModelParams(flags.modelParam);
+        if (!flags.model && params.length > 0) {
+          throw new Error("--model is required when using --model-param");
+        }
+        const mode = parseMode(flags.mode);
         await withHost(opts, false, false, async (host) => {
           const { run } = await host.sessions.create({
             workspaceId: flags.workspace,
             prompt: flags.prompt,
-            model: flags.model,
+            model:
+              flags.model === undefined
+                ? undefined
+                : { id: flags.model, params },
+            mode,
           });
           for await (const event of host.runs.attach({ runId: run.id })) {
             process.stdout.write(`${JSON.stringify(event)}\n`);

@@ -1,0 +1,146 @@
+[
+  {
+    "name": "hello-v1",
+    "direction": "client",
+    "valid": true,
+    "value": {
+      "type": "hello",
+      "protocolVersionMin": 1,
+      "protocolVersionMax": 1,
+      "capabilities": ["host.projects.v1", "host.runs.v1", "run-stream.v1"],
+      "host": { "stateDir": "/tmp/watt", "worktreeRoot": "/tmp/worktrees" }
+    }
+  },
+  {
+    "name": "projects-register",
+    "direction": "client",
+    "valid": true,
+    "value": {
+      "type": "request",
+      "version": 1,
+      "requestId": "01J00000000000000000000001",
+      "method": "projects.register",
+      "params": { "repoRoot": "/tmp/repo" }
+    }
+  },
+  {
+    "name": "runs-attach",
+    "direction": "client",
+    "valid": true,
+    "value": {
+      "type": "request",
+      "version": 1,
+      "requestId": "01J00000000000000000000002",
+      "method": "runs.attach",
+      "params": {
+        "runId": "01J00000000000000000000003",
+        "subscriptionId": "01J00000000000000000000004",
+        "afterSequence": 0
+      }
+    }
+  },
+  {
+    "name": "result",
+    "direction": "server",
+    "valid": true,
+    "value": {
+      "type": "result",
+      "version": 1,
+      "requestId": "01J00000000000000000000001",
+      "result": null
+    }
+  },
+  {
+    "name": "run-event",
+    "direction": "server",
+    "valid": true,
+    "value": {
+      "type": "run_event",
+      "version": 1,
+      "subscriptionId": "01J00000000000000000000004",
+      "runId": "01J00000000000000000000003",
+      "event": {
+        "type": "text_delta",
+        "text": "hello",
+        "workspaceId": "01J00000000000000000000005",
+        "sessionId": "01J00000000000000000000006",
+        "runId": "01J00000000000000000000003",
+        "sequence": 1
+      }
+    }
+  },
+  {
+    "name": "stream-end",
+    "direction": "server",
+    "valid": true,
+    "value": {
+      "type": "stream_end",
+      "version": 1,
+      "subscriptionId": "01J00000000000000000000004",
+      "runId": "01J00000000000000000000003",
+      "reason": "finished",
+      "result": { "runId": "01J00000000000000000000003", "status": "finished" }
+    }
+  },
+  {
+    "name": "unknown-method",
+    "direction": "client",
+    "valid": false,
+    "value": {
+      "type": "request",
+      "version": 1,
+      "requestId": "01J00000000000000000000007",
+      "method": "projects.delete",
+      "params": {}
+    }
+  },
+  {
+    "name": "bad-request-id",
+    "direction": "client",
+    "valid": false,
+    "value": {
+      "type": "request",
+      "version": 1,
+      "requestId": "not-an-id",
+      "method": "projects.list",
+      "params": {}
+    }
+  },
+  {
+    "name": "unknown-envelope-field",
+    "direction": "client",
+    "valid": false,
+    "value": {
+      "type": "request",
+      "version": 1,
+      "requestId": "01J00000000000000000000008",
+      "method": "projects.list",
+      "params": {},
+      "extra": true
+    }
+  },
+  {
+    "name": "invalid-params",
+    "direction": "client",
+    "valid": false,
+    "value": {
+      "type": "request",
+      "version": 1,
+      "requestId": "01J00000000000000000000009",
+      "method": "runs.attach",
+      "params": { "runId": "bad", "subscriptionId": "also-bad" }
+    }
+  },
+  {
+    "name": "invalid-stream-reason",
+    "direction": "server",
+    "valid": false,
+    "value": {
+      "type": "stream_end",
+      "version": 1,
+      "subscriptionId": "01J00000000000000000000004",
+      "runId": "01J00000000000000000000003",
+      "reason": "done"
+    }
+  }
+]

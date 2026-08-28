@@ -1,3 +1,5 @@
+import { isGitError } from "@watt/git";
+
 export class HostError extends Error {
   readonly code: string;
 
@@ -10,6 +12,17 @@ export class HostError extends Error {
 
 export function isHostError(value: unknown): value is HostError {
   return value instanceof HostError;
+}
+
+export type WattBoundaryError = Error & {
+  readonly code: string;
+  readonly details?: Readonly<Record<string, unknown>>;
+};
+
+export function isWattBoundaryError(
+  value: unknown,
+): value is WattBoundaryError {
+  return isHostError(value) || isGitError(value);
 }
 
 export function isUniqueConstraint(error: unknown): boolean {
