@@ -55,8 +55,8 @@ const plist = readFileSync(
 writeFileSync(path.join(contents, "Info.plist"), plist);
 
 function codesign(targetPath, entitlements) {
-  const args = ["--force"];
-  if (identity !== "-") args.push("--options", "runtime", "--timestamp");
+  const args = ["--force", "--options", "runtime"];
+  if (identity !== "-") args.push("--timestamp");
   if (entitlements) args.push("--entitlements", entitlements);
   args.push("--sign", identity, targetPath);
   const result = spawnSync("codesign", args, { stdio: "inherit" });
