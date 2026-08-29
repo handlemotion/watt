@@ -60,19 +60,25 @@ jobs:
 
       - name: Exercise packaged sidecar
         run: |
-          file apps/desktop/src-tauri/binaries/watt-desktop-sidecar-aarch64-apple-darwin | grep 'arm64'
+          file apps/desktop/binaries/watt-desktop-sidecar-aarch64-apple-darwin | grep 'arm64'
           pnpm desktop:sidecar:smoke
 
-      - name: Build ad-hoc-signed application
+      - name: Build ad-hoc-signed GPUI application
         env:
           APPLE_SIGNING_IDENTITY: "-"
-        run: cd apps/desktop && ../../node_modules/.bin/tauri build --target aarch64-apple-darwin --bundles app
+        run: |
+          cargo build --manifest-path apps/desktop/Cargo.toml --release --target aarch64-apple-darwin
+          pnpm desktop:bundle
+          pnpm desktop:app:smoke
 
       - name: Verify packaged application
         run: |
-          app='apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Watt.app'
+          app='apps/desktop/dist/aarch64-apple-darwin/Watt.app'
+          desktop="$app/Contents/MacOS/watt-desktop"
           sidecar="$app/Contents/MacOS/watt-desktop-sidecar"
           test -d "$app"
+          test -x "$desktop"
           test -x "$sidecar"
+          file "$desktop" | grep 'arm64'
           file "$sidecar" | grep 'arm64'
           codesign --verify --deep --strict --verbose=2 "$app"

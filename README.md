@@ -15,7 +15,7 @@ Drag Watt into Applications and launch it normally. The current desktop app is i
 
 ## Development
 
-Watt requires Node.js 22.13+, pnpm 11.22.0, and Rust for desktop work.
+Watt requires Node.js 22.13+, pnpm 11.22.0, the latest stable Rust toolchain, and Xcode for GPUI desktop work.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -25,4 +25,6 @@ pnpm desktop:sidecar
 pnpm desktop:sidecar:smoke
 ```
 
-`pnpm desktop:build` produces the local Tauri app and DMG on an Apple Silicon Mac. Release signing and notarization happen only in the protected GitHub `release` environment.
+After building the sidecar, run the minimal GPUI shell with `cargo run --manifest-path apps/desktop/Cargo.toml`. It intentionally exposes only Host readiness; future views should use the existing typed Rust bridge rather than introducing another transport.
+
+`pnpm desktop:build` produces an ad-hoc-signed GPUI app and DMG on an Apple Silicon Mac, including real packaged Host lifecycle probes. Developer ID signing and notarization happen only in the protected GitHub `release` environment.

@@ -53,7 +53,7 @@ No GitHub Actions secrets are required. The workflow's `id-token: write` permiss
 
 ## Release a version
 
-1. Update the root `package.json` version and `apps/desktop/src-tauri/Cargo.toml` package version to the same stable SemVer value. Run `pnpm install` if the lockfile changes.
+1. Update the root `package.json` version and `apps/desktop/Cargo.toml` package version to the same stable SemVer value. Run `pnpm install` if the lockfile changes.
 2. Run the local acceptance checks on an Apple Silicon Mac:
 
    ```sh
@@ -62,6 +62,11 @@ No GitHub Actions secrets are required. The workflow's `id-token: write` permiss
    pnpm check:rust
    pnpm desktop:sidecar
    pnpm desktop:sidecar:smoke
+   cargo build --manifest-path apps/desktop/Cargo.toml --release --target aarch64-apple-darwin
+   pnpm desktop:bundle
+   pnpm desktop:app:smoke
+   pnpm desktop:dmg
+   hdiutil verify apps/desktop/dist/aarch64-apple-darwin/Watt-aarch64.dmg
    pnpm release:check vX.Y.Z
    ```
 
@@ -72,7 +77,7 @@ No GitHub Actions secrets are required. The workflow's `id-token: write` permiss
    git push origin vX.Y.Z
    ```
 
-The workflow repeats all checks from a frozen install before requesting credentials, fetches the Apple values from Infisical through OIDC, imports the certificate into a temporary keychain, signs and notarizes the app, staples and verifies the app and DMG, produces `Watt-vX.Y.Z-aarch64.dmg` plus its SHA-256 checksum, records a GitHub artifact attestation, and publishes a draft release only after every acceptance check succeeds.
+The workflow repeats all checks from a frozen install before requesting credentials, fetches the Apple values from Infisical through OIDC, imports the certificate into a temporary keychain, builds the GPUI executable, packages and signs the app explicitly, runs the packaged GPUI-to-Host lifecycle probe, notarizes and staples the app and DMG, produces `Watt-vX.Y.Z-aarch64.dmg` plus its SHA-256 checksum, records a GitHub artifact attestation, and publishes a draft release only after every acceptance check succeeds.
 
 ## Failure recovery
 

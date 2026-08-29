@@ -22,13 +22,13 @@ if (schema.$id !== "https://watt.dev/schemas/desktop-sidecar-v1.json") {
 }
 
 const rustProtocol = await readFile(
-  new URL("../../apps/desktop/src-tauri/src/protocol.rs", packageRoot),
+  new URL("../../apps/desktop/src/protocol.rs", packageRoot),
   "utf8",
 );
 for (const marker of [
   "pub const PROTOCOL_VERSION: u32 = 1;",
   "pub const MAX_FRAME_BYTES: usize = 1024 * 1024;",
-  'include_str!("../../../../packages/desktop-sidecar/protocol.schema.json")',
+  'include_str!("../../../packages/desktop-sidecar/protocol.schema.json")',
 ]) {
   if (!rustProtocol.includes(marker)) {
     throw new Error(`Rust protocol is missing schema marker: ${marker}`);
