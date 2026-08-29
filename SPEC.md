@@ -13,7 +13,7 @@ This file is the source of truth. Packages must match it.
 
 ## Non-goals (v0)
 
-- Product workspace UI, Electron, automatic updates, or desktop platforms other than Apple Silicon macOS. v0's product surface remains libraries + CLI; its minimal Tauri 2 executable is distribution infrastructure allowed only to package the local Host and prove its lifecycle.
+- Product workspace UI, Electron, automatic updates, or desktop platforms other than Apple Silicon macOS. v0's product surface remains libraries + CLI; its minimal GPUI executable is distribution infrastructure allowed only to package the local Host and prove its lifecycle.
 - HTTP, WebSocket, ACP, or any alternate Host backend.
 - GitHub stacks (`gh stack`), nested worktrees, unarchive.
 - Cloud agents, ACP, Debug mode, Ask mode.
@@ -23,7 +23,7 @@ This file is the source of truth. Packages must match it.
 
 - Node **22.13+**, TypeScript strict, pnpm workspace, Turbo.
 - IDs: ULID. Paths: absolute, `realpath`’d.
-- No React or product UI packages. The desktop shell is static HTML/CSS/JavaScript and may display only local Host readiness or a safe startup error. `@cursor/sdk` only in `@watt/agent`. CLI imports `@watt/host` only.
+- No React, webview, or product UI packages. The GPUI desktop shell may display only local Host readiness or a safe startup error. `@cursor/sdk` only in `@watt/agent`. CLI imports `@watt/host` only.
 - `git` ↛ `agent` ↛ `git`. Only `host` imports both.
 - `desktop-sidecar` imports `host`; the Rust desktop bridge speaks only the bounded sidecar protocol.
 
@@ -294,15 +294,15 @@ The desktop boundary is a headless child process over stdin/stdout. It exposes t
 
 ### Desktop packaging shell
 
-The `apps/desktop` Tauri 2 application is named Watt with identifier `com.handlemotion.watt`. It is a supporting distribution artifact, not part of the v0 product surface, and exposes no workspace controls.
+The `apps/desktop` GPUI application is named Watt with identifier `com.handlemotion.watt`. It is a supporting distribution artifact, not part of the v0 product surface, and exposes no workspace controls.
 
-- The Rust bridge remains the only desktop boundary. Frontend code receives only a readiness state and safe message; it has no shell capability and does not import Watt packages.
-- `@yao-pkg/pkg` packages the Node Host as the Tauri sidecar `watt-desktop-sidecar-aarch64-apple-darwin`. Its version is pinned and its executable must complete the real protocol handshake in temporary directories before packaging.
+- The Rust bridge remains the only desktop boundary. GPUI receives only a readiness state and safe message; it has no direct shell capability and does not import Watt packages.
+- `@yao-pkg/pkg` packages the Node Host as `watt-desktop-sidecar-aarch64-apple-darwin`; the application bundle installs it beside the GPUI executable as `watt-desktop-sidecar`. Its version is pinned and its executable must complete the real protocol handshake in temporary directories before packaging.
 - The installed app stores Host state under its macOS application-data directory and worktrees in that directory's `worktrees` child. Closing requests `host.close()`, waits for a bounded graceful exit, then forcibly terminates a stuck child.
 - The root `package.json` version is the desktop release version and must equal the Rust package version and stable `vMAJOR.MINOR.PATCH` release tag.
 - The first distribution is an Apple Silicon DMG signed with Developer ID Application credentials, notarized and stapled by Apple, attested by GitHub, and attached to the exact existing Git tag's GitHub Release. Manual DMG upgrades are the only update path in v0.
 - The protected release job obtains Apple credentials from a read-only Infisical machine identity using GitHub OIDC. Apple credentials are never stored in or synchronized to GitHub Secrets, and they are requested only after source validation succeeds.
-- HTTP, WebSocket, updater, direct frontend shell access, and workspace product UI remain forbidden.
+- HTTP, WebSocket, updater, direct GPUI process control outside the typed Rust bridge, and workspace product UI remain forbidden.
 
 ### `@watt/cli`
 
@@ -337,7 +337,7 @@ Default `--state-dir`: `~/.watt`. Default `--worktree-root`: parent of `--repo` 
 - `@watt/agent`: mocked `CursorRuntime` only.
 - `@watt/host`: fake/real git + fake agent; migrations, operation diagnostics, phase-boundary startup recovery, ambiguity safety, cached listing, non-destructive reconciliation drift fixtures, FIFO sends, replay/tail attachment, cancellation, results, archive ordering, and graceful close.
 - Integration with `CURSOR_API_KEY` is **not** in the default suite.
-- Desktop CI additionally runs Rust formatting, clippy with warnings denied, Rust tests, a packaged arm64 sidecar handshake/shutdown smoke test, and an ad-hoc-signed Tauri application build.
+- Desktop CI additionally runs Rust formatting, clippy with warnings denied, Rust tests, a packaged arm64 sidecar handshake/shutdown smoke test, an ad-hoc-signed GPUI application build, the packaged GPUI-to-Host lifecycle smoke test, and a real GPUI window startup/shutdown probe.
 
 ## Code rules
 

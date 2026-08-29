@@ -7,7 +7,7 @@ const manifest = JSON.parse(
   readFileSync(path.join(root, "package.json"), "utf8"),
 );
 const cargo = readFileSync(
-  path.join(root, "apps", "desktop", "src-tauri", "Cargo.toml"),
+  path.join(root, "apps", "desktop", "Cargo.toml"),
   "utf8",
 );
 const cargoVersion = /^version = "([^"]+)"$/m.exec(cargo)?.[1];
