@@ -7,15 +7,22 @@ export async function resolveRepoRoot(repoRoot: string): Promise<string> {
   try {
     return await realpath(path.resolve(repoRoot));
   } catch (cause) {
-    throw new GitError(`repoRoot does not exist: ${repoRoot}`, "repo_not_found", {
-      cause,
-    });
+    throw new GitError(
+      `repoRoot does not exist: ${repoRoot}`,
+      "repo_not_found",
+      {
+        cause,
+      },
+    );
   }
 }
 
 export function assertAbsolutePath(label: string, value: string): string {
   if (!path.isAbsolute(value)) {
-    throw new GitError(`${label} must be an absolute path`, "path_not_absolute");
+    throw new GitError(
+      `${label} must be an absolute path`,
+      "path_not_absolute",
+    );
   }
   return path.resolve(value);
 }
@@ -24,7 +31,10 @@ export function isPathInside(root: string, target: string): boolean {
   const resolvedRoot = path.resolve(root);
   const resolvedTarget = path.resolve(target);
   const rel = path.relative(resolvedRoot, resolvedTarget);
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+  return (
+    rel === "" ||
+    (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
+  );
 }
 
 export async function resolveExistingPrefix(target: string): Promise<string> {

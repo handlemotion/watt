@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos-arm64:
+    name: macOS arm64
+    runs-on: macos-26
+    environment: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release version and source
+        run: |
+          pnpm release:check "$GITHUB_REF_NAME"
+          pnpm check
+          pnpm check:rust
+
+      - name: Refuse to overwrite a published release
+        run: |
+          api_error="$RUNNER_TEMP/watt-release-api-error"
+          set +e
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" 2>"$api_error")"
+          api_status=$?
+          set -e
+          if [ "$api_status" -eq 0 ]; then
+            if [ "$(jq -r '.draft' <<<"$release_json")" != 'true' ]; then
+              echo "A published release already exists for $GITHUB_REF_NAME" >&2
+              exit 1
+            fi
+            echo 'WATT_DRAFT_EXISTS=true' >> "$GITHUB_ENV"
+          elif grep -q '(HTTP 404)' "$api_error"; then
+            echo 'WATT_DRAFT_EXISTS=false' >> "$GITHUB_ENV"
+          else
+            cat "$api_error" >&2
+            exit "$api_status"
+          fi
+
+      - name: Validate Infisical configuration
+        env:
+          INFISICAL_IDENTITY_ID: ${{ vars.INFISICAL_IDENTITY_ID }}
+          INFISICAL_PROJECT_SLUG: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG }}
+          INFISICAL_SECRET_PATH: ${{ vars.INFISICAL_SECRET_PATH }}
+        run: |
+          : "${INFISICAL_IDENTITY_ID:?release environment variable INFISICAL_IDENTITY_ID is required}"
+          : "${INFISICAL_PROJECT_SLUG:?release environment variable INFISICAL_PROJECT_SLUG is required}"
+          : "${INFISICAL_ENV_SLUG:?release environment variable INFISICAL_ENV_SLUG is required}"
+          : "${INFISICAL_SECRET_PATH:?release environment variable INFISICAL_SECRET_PATH is required}"
+
+      - name: Fetch Apple credentials from Infisical
+        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ vars.INFISICAL_ENV_SLUG }}
+          secret-path: ${{ vars.INFISICAL_SECRET_PATH }}
+          recursive: false
+          include-imports: false
+          domain: ${{ vars.INFISICAL_DOMAIN || 'https://app.infisical.com' }}
+
+      - name: Validate Apple credentials
+        run: |
+          : "${APPLE_CERTIFICATE:?APPLE_CERTIFICATE is required}"
+          : "${APPLE_CERTIFICATE_PASSWORD:?APPLE_CERTIFICATE_PASSWORD is required}"
+          : "${APPLE_SIGNING_IDENTITY:?APPLE_SIGNING_IDENTITY is required}"
+          : "${APPLE_API_ISSUER:?APPLE_API_ISSUER is required}"
+          : "${APPLE_API_KEY:?APPLE_API_KEY is required}"
+          : "${APPLE_API_KEY_CONTENT:?APPLE_API_KEY_CONTENT is required}"
+
+      - name: Import signing certificate
+        run: |
+          umask 077
+          certificate="$RUNNER_TEMP/watt-signing.p12"
+          keychain="$RUNNER_TEMP/watt-build.keychain-db"
+          api_key="$RUNNER_TEMP/watt-notary-key.p8"
+          keychain_password="$(openssl rand -hex 32)"
+          printf '%s' "$APPLE_CERTIFICATE" | openssl base64 -d -A -out "$certificate"
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$api_key"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security default-keychain -d user -s "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -f pkcs12 -k "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          security find-identity -v -p codesigning "$keychain" | grep -F "$APPLE_SIGNING_IDENTITY"
+          echo "APPLE_API_KEY_PATH=$api_key" >> "$GITHUB_ENV"
+
+      - name: Package and exercise arm64 sidecar
+        run: |
+          pnpm desktop:sidecar
+          sidecar='apps/desktop/src-tauri/binaries/watt-desktop-sidecar-aarch64-apple-darwin'
+          file "$sidecar" | grep 'arm64'
+          pnpm desktop:sidecar:smoke
+
+      - name: Build, sign, notarize, and staple DMG
+        run: cd apps/desktop && ../../node_modules/.bin/tauri build --target aarch64-apple-darwin --bundles app,dmg
+
+      - name: Verify distribution
+        run: |
+          bundle='apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle'
+          app="$bundle/macos/Watt.app"
+          sidecar="$app/Contents/MacOS/watt-desktop-sidecar"
+          dmg="$(find "$bundle/dmg" -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -d "$app"
+          test -n "$dmg"
+          test -x "$sidecar"
+          file "$sidecar" | grep 'arm64'
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+          release_dir="$RUNNER_TEMP/watt-release"
+          mkdir -p "$release_dir"
+          asset="$release_dir/Watt-${GITHUB_REF_NAME}-aarch64.dmg"
+          cp "$dmg" "$asset"
+          (cd "$release_dir" && shasum -a 256 "$(basename "$asset")" > "$(basename "$asset").sha256")
+
+      - name: Attest release assets
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/watt-release/*
+
+      - name: Create or update draft release
+        run: |
+          release_dir="$RUNNER_TEMP/watt-release"
+          if [ "$WATT_DRAFT_EXISTS" = 'true' ]; then
+            gh release upload "$GITHUB_REF_NAME" "$release_dir"/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$release_dir"/* \
+              --verify-tag \
+              --draft \
+              --generate-notes \
+              --title "Watt $GITHUB_REF_NAME"
+          fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+
+      - name: Clean signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/watt-build.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/watt-signing.p12" "$RUNNER_TEMP/watt-notary-key.p8" "$RUNNER_TEMP/watt-release-api-error"

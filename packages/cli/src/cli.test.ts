@@ -11,7 +11,9 @@ async function initRepo(parent: string): Promise<string> {
   const repo = path.join(parent, "repo");
   await mkdir(repo);
   await execa("git", ["init", "-b", "main"], { cwd: repo });
-  await execa("git", ["config", "user.email", "watt@example.com"], { cwd: repo });
+  await execa("git", ["config", "user.email", "watt@example.com"], {
+    cwd: repo,
+  });
   await execa("git", ["config", "user.name", "Watt"], { cwd: repo });
   await writeFile(path.join(repo, "README.md"), "watt\n");
   await execa("git", ["add", "README.md"], { cwd: repo });
@@ -28,7 +30,9 @@ describe("watt cli", () => {
     const chunks: string[] = [];
     const originalWrite = process.stdout.write.bind(process.stdout);
     process.stdout.write = ((chunk: string | Uint8Array) => {
-      chunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+      chunks.push(
+        typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk),
+      );
       return true;
     }) as typeof process.stdout.write;
     try {

@@ -7,7 +7,12 @@ import { GitError } from "./errors.js";
 
 export async function runSetupCommand(
   command: string,
-  options: { cwd: string; timeoutMs: number; env: NodeJS.ProcessEnv; signal?: AbortSignal },
+  options: {
+    cwd: string;
+    timeoutMs: number;
+    env: NodeJS.ProcessEnv;
+    signal?: AbortSignal;
+  },
 ): Promise<void> {
   const asScript = path.isAbsolute(command) ? await isFile(command) : false;
   try {
@@ -23,7 +28,10 @@ export async function runSetupCommand(
       throw new GitError("setup timed out", "timeout");
     }
     if (result.exitCode !== 0) {
-      throw new GitError(`setup failed: ${result.stderr || result.stdout}`, "setup_failed");
+      throw new GitError(
+        `setup failed: ${result.stderr || result.stdout}`,
+        "setup_failed",
+      );
     }
   } catch (cause) {
     if (cause instanceof GitError) {

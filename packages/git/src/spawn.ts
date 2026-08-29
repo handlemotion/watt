@@ -30,10 +30,10 @@ export const defaultGitSpawn: GitSpawn = async (args, options) => {
     if (cause instanceof GitError) {
       throw cause;
     }
-    if (
-      cause instanceof ExecaError && (cause.timedOut || cause.isCanceled)
-    ) {
-      throw new GitError(`git ${args.join(" ")} timed out`, "timeout", { cause });
+    if (cause instanceof ExecaError && (cause.timedOut || cause.isCanceled)) {
+      throw new GitError(`git ${args.join(" ")} timed out`, "timeout", {
+        cause,
+      });
     }
     throw new GitError(`git ${args.join(" ")} failed`, "git_failed", { cause });
   }
