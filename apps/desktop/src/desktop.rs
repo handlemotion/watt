@@ -9,8 +9,8 @@ use std::{
 
 use directories::BaseDirs;
 use gpui::{
-    App, Application, Bounds, Context, Timer, Window, WindowBounds, WindowOptions, div, prelude::*,
-    px, rgb, size,
+    App, Application, Bounds, Timer, TitlebarOptions, WindowBounds, WindowOptions, point,
+    prelude::*, px, size,
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -19,7 +19,11 @@ use tokio::{
     time::timeout,
 };
 
-use crate::{SidecarHostClient, protocol::HostOptions};
+use crate::{
+    SidecarHostClient,
+    protocol::HostOptions,
+    ui::{Assets, ShellView, WINDOW_HEIGHT, WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH, WINDOW_WIDTH},
+};
 
 const APP_IDENTIFIER: &str = "com.handlemotion.watt";
 const SIDECAR_NAME: &str = "watt-desktop-sidecar";
@@ -34,6 +38,7 @@ enum DesktopStatus {
 }
 
 impl DesktopStatus {
+    #[cfg_attr(not(test), expect(dead_code))]
     fn message(&self) -> &'static str {
         match self {
             Self::Starting => "Starting local host…",
@@ -237,48 +242,6 @@ async fn terminate_child(child: &mut Child) {
     let _ = child.wait().await;
 }
 
-struct ReadinessView {
-    status: Arc<RwLock<DesktopStatus>>,
-}
-
-impl ReadinessView {
-    fn new(status: Arc<RwLock<DesktopStatus>>, cx: &mut Context<Self>) -> Self {
-        cx.spawn(async move |view, cx| {
-            loop {
-                Timer::after(Duration::from_millis(100)).await;
-                if view.update(cx, |_, cx| cx.notify()).is_err() {
-                    break;
-                }
-            }
-        })
-        .detach();
-        Self { status }
-    }
-}
-
-impl Render for ReadinessView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let status = self
-            .status
-            .read()
-            .expect("desktop status lock poisoned")
-            .clone();
-        let color = match status {
-            DesktopStatus::Starting => rgb(0x8a8a8a),
-            DesktopStatus::Ready => rgb(0x238636),
-            DesktopStatus::Error => rgb(0xb42318),
-        };
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(rgb(0xf6f6f6))
-            .text_color(color)
-            .child(status.message())
-    }
-}
-
 pub fn run() {
     let arguments = env::args_os().collect::<Vec<_>>();
     if arguments.iter().any(|argument| argument == "--host-smoke") {
@@ -307,49 +270,51 @@ pub fn run() {
             })
         }
     };
-    let view_status = runtime.status.clone();
     let quit_runtime = runtime.clone();
     let window_close_runtime = runtime.clone();
 
-    Application::new().run(move |cx: &mut App| {
-        cx.on_app_quit(move |_| {
-            quit_runtime.stop();
-            if gpui_smoke {
-                println!("GPUI window startup and graceful shutdown passed.");
-            }
-            async {}
-        })
-        .detach();
-        cx.on_window_closed(move |cx| {
-            if cx.windows().is_empty() {
-                window_close_runtime.stop();
-                cx.quit();
-            }
-        })
-        .detach();
-        let bounds = Bounds::centered(None, size(px(560.0), px(360.0)), cx);
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                window_min_size: Some(size(px(440.0), px(280.0))),
-                titlebar: Some(gpui::TitlebarOptions {
-                    title: Some("Watt".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            |_, cx| cx.new(|cx| ReadinessView::new(view_status.clone(), cx)),
-        )
-        .expect("failed to open Watt window");
-        cx.activate(true);
-        if gpui_smoke {
-            cx.spawn(async move |cx| {
-                Timer::after(Duration::from_millis(500)).await;
-                cx.update(|cx| cx.quit())
+    Application::new()
+        .with_assets(Assets)
+        .run(move |cx: &mut App| {
+            cx.on_app_quit(move |_| {
+                quit_runtime.stop();
+                if gpui_smoke {
+                    println!("GPUI window startup and graceful shutdown passed.");
+                }
+                async {}
             })
             .detach();
-        }
-    });
+            cx.on_window_closed(move |cx| {
+                if cx.windows().is_empty() {
+                    window_close_runtime.stop();
+                    cx.quit();
+                }
+            })
+            .detach();
+            let bounds = Bounds::centered(None, size(WINDOW_WIDTH, WINDOW_HEIGHT), cx);
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    window_min_size: Some(size(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)),
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("Watt".into()),
+                        appears_transparent: true,
+                        traffic_light_position: Some(point(px(16.0), px(13.0))),
+                    }),
+                    ..Default::default()
+                },
+                |_, cx| cx.new(|_| ShellView::new()),
+            )
+            .expect("failed to open Watt window");
+            cx.activate(true);
+            if gpui_smoke {
+                cx.spawn(async move |cx| {
+                    Timer::after(Duration::from_millis(500)).await;
+                    cx.update(|cx| cx.quit())
+                })
+                .detach();
+            }
+        });
 
     runtime.stop();
 }

@@ -1,0 +1,10 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="IconPullRequest">
+<path id="Vector" d="M4 5.5C4.82843 5.5 5.5 4.82843 5.5 4C5.5 3.17157 4.82843 2.5 4 2.5C3.17157 2.5 2.5 3.17157 2.5 4C2.5 4.82843 3.17157 5.5 4 5.5Z" stroke="#08BD32" stroke-width="0.875" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_2" d="M4 13.5C4.82843 13.5 5.5 12.8284 5.5 12C5.5 11.1716 4.82843 10.5 4 10.5C3.17157 10.5 2.5 11.1716 2.5 12C2.5 12.8284 3.17157 13.5 4 13.5Z" stroke="#08BD32" stroke-width="0.875" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_3" d="M12 13.5C12.8284 13.5 13.5 12.8284 13.5 12C13.5 11.1716 12.8284 10.5 12 10.5C11.1716 10.5 10.5 11.1716 10.5 12C10.5 12.8284 11.1716 13.5 12 13.5Z" stroke="#08BD32" stroke-width="0.875" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_4" d="M4 5.5V10.5" stroke="#08BD32" stroke-width="0.875" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_5" d="M8.66667 4H10.6667C11.4031 4 12 4.59695 12 5.33333V10.5" stroke="#08BD32" stroke-width="0.875" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_6" d="M9.33333 2.5L7.83333 4L9.33333 5.5" stroke="#08BD32" stroke-width="0.875" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</svg>
