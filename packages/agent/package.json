@@ -19,7 +19,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@cursor/sdk": "1.0.29"
+    "@cursor/sdk": "1.0.29",
+    "@openai/codex-sdk": "0.151.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

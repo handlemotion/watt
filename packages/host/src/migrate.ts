@@ -1,6 +1,6 @@
 import type { Database as SqliteDatabase } from "better-sqlite3";
 
-const VERSION = 4;
+const VERSION = 5;
 
 const V1_DDL = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -118,6 +118,19 @@ CREATE TABLE capability_cache (
 );
 `;
 
+const V5_DDL = `
+ALTER TABLE sessions ADD COLUMN runtime TEXT NOT NULL DEFAULT 'cursor-local';
+CREATE TABLE capability_cache_new (
+  key TEXT PRIMARY KEY CHECK (key IN ('cursor_models', 'codex_models')),
+  payload_json TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL
+);
+INSERT INTO capability_cache_new (key, payload_json, fetched_at)
+  SELECT key, payload_json, fetched_at FROM capability_cache;
+DROP TABLE capability_cache;
+ALTER TABLE capability_cache_new RENAME TO capability_cache;
+`;
+
 export function migrate(database: SqliteDatabase): void {
   database.pragma("journal_mode = WAL");
   database.pragma("foreign_keys = ON");
@@ -153,6 +166,7 @@ export function migrate(database: SqliteDatabase): void {
     if (current < 2) database.exec(V2_DDL);
     if (current < 3) database.exec(V3_DDL);
     if (current < 4) database.exec(V4_DDL);
+    if (current < 5) database.exec(V5_DDL);
     database.pragma(`user_version = ${VERSION}`);
   })();
 }

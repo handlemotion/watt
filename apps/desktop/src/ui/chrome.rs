@@ -1,47 +1,71 @@
 use gpui::{
-    App, IntoElement, Pixels, RenderOnce, SharedString, Window, WindowControlArea, div, prelude::*,
-    px,
+    App, ClickEvent, Context, CursorStyle, ElementId, IntoElement, SharedString, Window,
+    WindowControlArea, div, prelude::*, px,
 };
 
 use super::{
     icon::{Icon, IconName},
+    shell::ShellView,
     text::text,
     theme,
 };
 
-#[derive(IntoElement)]
-pub struct Chrome;
+pub fn chrome(shell: &ShellView, cx: &mut Context<ShellView>) -> impl IntoElement {
+    let can_go_back = shell.can_go_back();
+    let can_go_forward = shell.can_go_forward();
+    let active_id = shell.active_id();
 
-impl RenderOnce for Chrome {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        div()
-            .id("chrome")
-            .flex()
-            .flex_none()
-            .w_full()
-            .h(theme::CHROME_HEIGHT)
-            .items_center()
-            .justify_between()
-            .overflow_hidden()
-            .bg(theme::titlebar())
-            .border_b_1()
-            .border_color(theme::border())
-            .window_control_area(WindowControlArea::Drag)
-            .child(
-                div()
-                    .flex()
-                    .h_full()
-                    .items_center()
-                    .child(nav_cluster())
-                    .child(tab("inactive-tab", "Add new", false))
-                    .child(tab("active-tab", "Add new", true))
-                    .child(plus_cluster()),
-            )
-            .child(trailing_cluster())
-    }
+    div()
+        .id("chrome")
+        .flex()
+        .flex_none()
+        .w_full()
+        .h(theme::CHROME_HEIGHT)
+        .items_center()
+        .overflow_hidden()
+        .bg(theme::titlebar())
+        .border_b_1()
+        .border_color(theme::border())
+        .child(nav_cluster(can_go_back, can_go_forward, cx))
+        .child(
+            div()
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .items_center()
+                .child(chat_tabs(shell, active_id, cx))
+                .child(plus_cluster(cx))
+                .child(
+                    div()
+                        .id("chrome-drag")
+                        .flex_1()
+                        .h_full()
+                        .min_w_0()
+                        .window_control_area(WindowControlArea::Drag),
+                ),
+        )
+        .child(trailing_cluster())
 }
 
-fn nav_cluster() -> impl IntoElement {
+fn chat_tabs(shell: &ShellView, active_id: u64, cx: &mut Context<ShellView>) -> impl IntoElement {
+    let mut tabs = div()
+        .id("chat-tabs")
+        .flex()
+        .h_full()
+        .min_w_0()
+        .overflow_x_scroll();
+    for chat in shell.chats() {
+        tabs = tabs.child(tab(chat.id, chat.title.clone(), chat.id == active_id, cx));
+    }
+    tabs
+}
+
+fn nav_cluster(
+    can_go_back: bool,
+    can_go_forward: bool,
+    cx: &mut Context<ShellView>,
+) -> impl IntoElement {
     div()
         .flex()
         .flex_none()
@@ -51,39 +75,92 @@ fn nav_cluster() -> impl IntoElement {
         .px(px(10.0))
         .border_r_1()
         .border_color(theme::border())
-        .child(icon_hit_target("sidebar", IconName::Sidebar, px(16.0)))
-        .child(icon_hit_target("back", IconName::ArrowLeft, px(16.0)))
-        .child(icon_hit_target("forward", IconName::ArrowRight, px(16.0)))
+        .child(icon_hit_target(
+            "sidebar",
+            IconName::Sidebar,
+            true,
+            false,
+            |_, _, _| {},
+        ))
+        .child(icon_hit_target(
+            "back",
+            IconName::ArrowLeft,
+            can_go_back,
+            false,
+            cx.listener(|this, _, _, cx| {
+                this.go_back();
+                cx.notify();
+            }),
+        ))
+        .child(icon_hit_target(
+            "forward",
+            IconName::ArrowRight,
+            can_go_forward,
+            false,
+            cx.listener(|this, _, _, cx| {
+                this.go_forward();
+                cx.notify();
+            }),
+        ))
 }
 
-fn tab(id: &'static str, title: &'static str, active: bool) -> impl IntoElement {
+fn tab(
+    id: u64,
+    title: SharedString,
+    active: bool,
+    cx: &mut Context<ShellView>,
+) -> impl IntoElement {
     div()
-        .id(SharedString::from(id))
+        .id(("chat-tab", id))
         .flex()
         .flex_none()
         .h_full()
         .items_center()
-        .gap(px(48.0))
         .pl(px(16.0))
         .pr(px(10.0))
         .border_r_1()
         .border_color(theme::border())
+        .cursor(CursorStyle::PointingHand)
         .when(active, |this| this.bg(theme::white()))
+        .when(!active, |this| {
+            this.hover(|style| style.bg(theme::control_hover()))
+                .active(|style| style.bg(theme::control_pressed()))
+        })
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.select_chat(id);
+            cx.notify();
+        }))
         .child(text(14.0, theme::text(), title))
+        .child(div().flex_none().w(theme::TAB_TITLE_GAP).h_full())
         .child(icon_hit_target(
-            SharedString::from(format!("{id}-close")),
+            ("chat-tab-close", id),
             IconName::Cross,
-            px(14.0),
+            true,
+            active,
+            cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.close_chat(id);
+                cx.notify();
+            }),
         ))
 }
 
-fn plus_cluster() -> impl IntoElement {
+fn plus_cluster(cx: &mut Context<ShellView>) -> impl IntoElement {
     div()
         .flex()
         .flex_none()
         .items_center()
         .px(px(10.0))
-        .child(icon_hit_target("new-tab", IconName::Plus14, px(14.0)))
+        .child(icon_hit_target(
+            "new-tab",
+            IconName::Plus14,
+            true,
+            false,
+            cx.listener(|this, _, _, cx| {
+                this.new_chat();
+                cx.notify();
+            }),
+        ))
 }
 
 fn trailing_cluster() -> impl IntoElement {
@@ -96,7 +173,13 @@ fn trailing_cluster() -> impl IntoElement {
         .px(px(10.0))
         .border_l_1()
         .border_color(theme::border())
-        .child(icon_hit_target("console", IconName::Console, px(16.0)))
+        .child(icon_hit_target(
+            "console",
+            IconName::Console,
+            true,
+            false,
+            |_, _, _| {},
+        ))
         .child(pull_request_chip())
 }
 
@@ -113,27 +196,51 @@ fn pull_request_chip() -> impl IntoElement {
         .rounded(px(88.0))
         .bg(theme::pull_request_bg())
         .overflow_hidden()
-        .child(
-            Icon::new(IconName::PullRequest)
-                .size(px(16.0))
-                .color(theme::pull_request_fg()),
-        )
+        .child(Icon::new(IconName::PullRequest).color(theme::pull_request_fg()))
         .child(text(13.0, theme::pull_request_fg(), "#112"))
 }
 
 fn icon_hit_target(
-    id: impl Into<gpui::ElementId>,
+    id: impl Into<ElementId>,
     icon: IconName,
-    icon_size: Pixels,
+    enabled: bool,
+    on_white: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let icon_color = if enabled {
+        theme::text()
+    } else {
+        theme::muted()
+    };
+    let hover = if on_white {
+        theme::control_hover_on_white()
+    } else {
+        theme::control_hover()
+    };
+    let pressed = if on_white {
+        theme::control_pressed_on_white()
+    } else {
+        theme::control_pressed()
+    };
+
     div()
         .id(id)
         .flex()
         .flex_none()
-        .size(px(24.0))
+        .size(theme::ICON_HIT)
         .items_center()
         .justify_center()
         .overflow_hidden()
         .rounded(px(6.0))
-        .child(Icon::new(icon).size(icon_size))
+        .map(|this| {
+            if enabled {
+                this.cursor(CursorStyle::PointingHand)
+                    .hover(move |style| style.bg(hover))
+                    .active(move |style| style.bg(pressed))
+                    .on_click(on_click)
+            } else {
+                this.opacity(0.4)
+            }
+        })
+        .child(Icon::new(icon).color(icon_color))
 }

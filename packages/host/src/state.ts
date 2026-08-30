@@ -30,6 +30,7 @@ type WorkspaceRow = {
 type SessionRow = {
   id: string;
   workspace_id: string;
+  runtime: string;
   cursor_agent_id: string;
   mode: string;
   model: string;
@@ -102,9 +103,13 @@ function session(row: SessionRow): Session {
   if (row.mode !== "agent" && row.mode !== "plan") {
     throw new Error(`invalid persisted session mode: ${row.mode}`);
   }
+  if (row.runtime !== "cursor-local" && row.runtime !== "codex-local") {
+    throw new Error(`invalid persisted session runtime: ${row.runtime}`);
+  }
   return {
     id: row.id,
     workspaceId: row.workspace_id,
+    runtime: row.runtime,
     cursorAgentId: row.cursor_agent_id,
     mode: row.mode,
     model: {
@@ -230,13 +235,16 @@ export function createState(database: SqliteDatabase) {
       "UPDATE workspaces SET archived_at = ? WHERE id = ?",
     ),
     sessionById: database.prepare(
-      "SELECT id, workspace_id, cursor_agent_id, mode, model, model_params_json, execution_policy_json, created_at FROM sessions WHERE id = ?",
+      "SELECT id, workspace_id, runtime, cursor_agent_id, mode, model, model_params_json, execution_policy_json, created_at FROM sessions WHERE id = ?",
     ),
     sessionsForWorkspace: database.prepare(
-      "SELECT id, workspace_id, cursor_agent_id, mode, model, model_params_json, execution_policy_json, created_at FROM sessions WHERE workspace_id = ? ORDER BY created_at",
+      "SELECT id, workspace_id, runtime, cursor_agent_id, mode, model, model_params_json, execution_policy_json, created_at FROM sessions WHERE workspace_id = ? ORDER BY created_at",
     ),
     insertSession: database.prepare(
-      "INSERT INTO sessions (id, workspace_id, cursor_agent_id, mode, model, model_params_json, execution_policy_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO sessions (id, workspace_id, runtime, cursor_agent_id, mode, model, model_params_json, execution_policy_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ),
+    updateSessionCursorAgentId: database.prepare(
+      "UPDATE sessions SET cursor_agent_id = ? WHERE id = ?",
     ),
     runById: database.prepare(`SELECT ${RUN_COLUMNS} FROM runs WHERE id = ?`),
     runsForSession: database.prepare(
@@ -274,10 +282,10 @@ export function createState(database: SqliteDatabase) {
       "SELECT sequence, event_json FROM run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence",
     ),
     capabilityCache: database.prepare(
-      "SELECT payload_json, fetched_at FROM capability_cache WHERE key = 'cursor_models'",
+      "SELECT payload_json, fetched_at FROM capability_cache WHERE key = ?",
     ),
     upsertCapabilityCache: database.prepare(
-      "INSERT INTO capability_cache (key, payload_json, fetched_at) VALUES ('cursor_models', ?, ?) ON CONFLICT(key) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at",
+      "INSERT INTO capability_cache (key, payload_json, fetched_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at",
     ),
     operationById: database.prepare(
       `SELECT ${OPERATION_COLUMNS} FROM operations WHERE id = ?`,
@@ -325,6 +333,7 @@ export function createState(database: SqliteDatabase) {
       statements.insertSession.run(
         sessionValue.id,
         sessionValue.workspaceId,
+        sessionValue.runtime,
         sessionValue.cursorAgentId,
         sessionValue.mode,
         sessionValue.model.id,
@@ -457,6 +466,7 @@ export function createState(database: SqliteDatabase) {
       statements.insertSession.run(
         value.id,
         value.workspaceId,
+        value.runtime,
         value.cursorAgentId,
         value.mode,
         value.model.id,
@@ -464,6 +474,9 @@ export function createState(database: SqliteDatabase) {
         JSON.stringify(value.executionPolicy),
         value.createdAt,
       );
+    },
+    updateSessionCursorAgentId(id: string, cursorAgentId: string): void {
+      statements.updateSessionCursorAgentId.run(cursorAgentId, id);
     },
     insertSessionAndRun(
       sessionValue: Session,
@@ -545,16 +558,25 @@ export function createState(database: SqliteDatabase) {
     listRunEventsAfter(runId: string, sequence: number): RunEventRow[] {
       return statements.runEventsAfter.all(runId, sequence) as RunEventRow[];
     },
-    getCapabilityCache():
-      { payloadJson: string; fetchedAt: number } | undefined {
-      const row = statements.capabilityCache.get() as
+    getCapabilityCache(
+      key: "cursor_models" | "codex_models" = "cursor_models",
+    ): { payloadJson: string; fetchedAt: number } | undefined {
+      const row = statements.capabilityCache.get(key) as
         CapabilityCacheRow | undefined;
       return (
         row && { payloadJson: row.payload_json, fetchedAt: row.fetched_at }
       );
     },
-    putCapabilityCache(models: unknown, fetchedAt: number): void {
-      statements.upsertCapabilityCache.run(JSON.stringify(models), fetchedAt);
+    putCapabilityCache(
+      models: unknown,
+      fetchedAt: number,
+      key: "cursor_models" | "codex_models" = "cursor_models",
+    ): void {
+      statements.upsertCapabilityCache.run(
+        key,
+        JSON.stringify(models),
+        fetchedAt,
+      );
     },
     getOperation(id: string): WorkspaceOperation | undefined {
       const row = statements.operationById.get(id) as OperationRow | undefined;

@@ -36,6 +36,14 @@ function parseMode(value: string | undefined): "agent" | "plan" {
   throw new Error(`invalid --mode: ${value}; expected agent or plan`);
 }
 
+function parseRuntime(
+  value: string | undefined,
+): "cursor-local" | "codex-local" {
+  if (value === undefined || value === "cursor") return "cursor-local";
+  if (value === "chatgpt") return "codex-local";
+  throw new Error(`invalid --runtime: ${value}; expected cursor or chatgpt`);
+}
+
 async function withHost<T>(
   opts: GlobalOpts,
   requireRepo: boolean,
@@ -141,6 +149,7 @@ export function createProgram(): Command {
       [],
     )
     .option("--mode <agent|plan>", "conversation mode", "agent")
+    .option("--runtime <cursor|chatgpt>", "agent runtime", "cursor")
     .action(
       async (flags: {
         workspace: string;
@@ -148,6 +157,7 @@ export function createProgram(): Command {
         model?: string;
         modelParam: string[];
         mode?: string;
+        runtime?: string;
       }) => {
         const opts = program.opts<GlobalOpts>();
         const params = parseModelParams(flags.modelParam);
@@ -155,10 +165,12 @@ export function createProgram(): Command {
           throw new Error("--model is required when using --model-param");
         }
         const mode = parseMode(flags.mode);
+        const runtime = parseRuntime(flags.runtime);
         await withHost(opts, false, false, async (host) => {
           const { run } = await host.sessions.create({
             workspaceId: flags.workspace,
             prompt: flags.prompt,
+            runtime,
             model:
               flags.model === undefined
                 ? undefined

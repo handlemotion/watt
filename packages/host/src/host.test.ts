@@ -15,6 +15,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import type { WattAgent, WattRunResult } from "@watt/agent";
+import { AgentError, DEFAULT_CODEX_CATALOG } from "@watt/agent";
 import { createGit, type GitService } from "@watt/git";
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
@@ -205,6 +206,42 @@ function fakeAgent(): WattAgent & {
       const value = runs.get(input.cursorRunId);
       if (!value) throw new Error(`unknown cursor run: ${input.cursorRunId}`);
       return value;
+    },
+  };
+}
+
+function fakeCodexAgent(): WattAgent & { creates: number } {
+  const agent = fakeAgent();
+  let creates = 0;
+  return {
+    ...agent,
+    creates,
+    async listModels() {
+      return DEFAULT_CODEX_CATALOG;
+    },
+    async create() {
+      creates += 1;
+      this.creates = creates;
+      return {
+        cursorAgentId: "codex-thread-1",
+        async send(_prompt, options) {
+          if (options?.idempotencyKey) {
+            agent.idempotencyKeys.push(options.idempotencyKey);
+          }
+          return {
+            cursorRunId: `codex-run-${String(creates)}`,
+            async *stream() {
+              yield { type: "text_delta" as const, text: "codex" };
+            },
+            wait: async () => ({
+              status: "finished" as const,
+              result: "codex-result",
+              durationMs: 5,
+            }),
+            cancel: async () => undefined,
+          };
+        },
+      };
     },
   };
 }
@@ -427,7 +464,12 @@ describe("createHost", () => {
       INSERT INTO sessions VALUES ('session', 'workspace', 'cursor-session', 'agent', 'composer-2.5', 3);
     `);
     migrate(database);
-    expect(database.pragma("user_version", { simple: true })).toBe(4);
+    expect(database.pragma("user_version", { simple: true })).toBe(5);
+    expect(
+      database
+        .prepare("SELECT runtime FROM sessions WHERE id = 'session'")
+        .get(),
+    ).toEqual({ runtime: "cursor-local" });
     expect(database.pragma("journal_mode", { simple: true })).toBe("wal");
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(database.pragma("busy_timeout", { simple: true })).toBe(5000);
@@ -564,7 +606,7 @@ describe("createHost", () => {
 
     migrate(database);
 
-    expect(database.pragma("user_version", { simple: true })).toBe(4);
+    expect(database.pragma("user_version", { simple: true })).toBe(5);
     expect(
       database.prepare("SELECT COUNT(*) AS count FROM sessions").get(),
     ).toEqual({ count: 1 });
@@ -1777,5 +1819,145 @@ describe("createHost", () => {
     });
     expect(agent.starts).toHaveLength(1);
     await reopened.close();
+  });
+
+  it("dispatches Codex sessions to the Codex agent and rejects plan mode", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-codex-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const cursor = fakeAgent();
+    const codex = fakeCodexAgent();
+    const createSpy = vi.spyOn(codex, "create");
+    const cursorCreate = vi.spyOn(cursor, "create");
+    const host = await createHost({
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent: cursor,
+      codexAgent: codex,
+    });
+    const capabilities = await host.capabilities();
+    expect(capabilities.runtimes.map((runtime) => runtime.id)).toEqual([
+      "cursor-local",
+      "codex-local",
+    ]);
+    expect(
+      capabilities.runtimes.find((runtime) => runtime.id === "codex-local"),
+    ).toMatchObject({
+      modes: ["agent"],
+      executionPolicy: { controls: ["sandbox"] },
+      models: expect.arrayContaining([
+        expect.objectContaining({ id: "codex:gpt-5.5" }),
+      ]),
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "codex",
+    });
+    await expect(
+      host.sessions.create({
+        workspaceId: workspace.id,
+        runtime: "codex-local",
+        mode: "plan",
+        prompt: "plan",
+      }),
+    ).rejects.toMatchObject({ code: "mode_unsupported" });
+    expect(createSpy).not.toHaveBeenCalled();
+
+    const created = await host.sessions.create({
+      workspaceId: workspace.id,
+      runtime: "codex-local",
+      prompt: "implement",
+    });
+    expect(created.session).toMatchObject({
+      runtime: "codex-local",
+      cursorAgentId: "codex-thread-1",
+      model: { id: "codex:gpt-5.5" },
+    });
+    expect(cursorCreate).not.toHaveBeenCalled();
+    expect(createSpy).toHaveBeenCalledOnce();
+    await expect(
+      host.runs.wait({ runId: created.run.id }),
+    ).resolves.toMatchObject({
+      status: "finished",
+      result: "codex-result",
+    });
+    await host.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("fails Codex sessions with codex_auth_unavailable when the catalog reports it", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-codex-auth-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const cursor = fakeAgent();
+    const error = Object.assign(new Error("not logged in"), {
+      code: "codex_auth_unavailable",
+    });
+    const host = await createHost({
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent: cursor,
+      codexAgent: {
+        ...fakeCodexAgent(),
+        async listModels() {
+          throw error;
+        },
+      },
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "auth",
+    });
+    await expect(
+      host.sessions.create({
+        workspaceId: workspace.id,
+        runtime: "codex-local",
+        prompt: "go",
+      }),
+    ).rejects.toMatchObject({ code: "codex_auth_unavailable" });
+    await host.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("fails Codex sessions with codex_auth_unavailable when startThread fails", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "watt-host-codex-create-auth-"),
+    );
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const cursor = fakeAgent();
+    const host = await createHost({
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent: cursor,
+      codexAgent: {
+        ...fakeCodexAgent(),
+        async create() {
+          throw new AgentError("Run `codex login`", "codex_auth_unavailable");
+        },
+      },
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "create-auth",
+    });
+    await expect(
+      host.sessions.create({
+        workspaceId: workspace.id,
+        runtime: "codex-local",
+        prompt: "go",
+      }),
+    ).rejects.toMatchObject({
+      name: "HostError",
+      code: "codex_auth_unavailable",
+    });
+    await host.close();
+    await rm(root, { recursive: true, force: true });
   });
 });

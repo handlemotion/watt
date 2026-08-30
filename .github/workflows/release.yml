@@ -2,11 +2,13 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags:
       - "v*.*.*"
 
 permissions:
   contents: write
+  pull-requests: write
   id-token: write
   attestations: write
 
@@ -15,15 +17,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  macos-arm64:
-    name: macOS arm64
-    runs-on: macos-26
-    environment: release
-    env:
-      GH_TOKEN: ${{ github.token }}
+  version:
+    name: Version packages
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      should-package: ${{ steps.gate.outputs.should-package }}
+      tag: ${{ steps.gate.outputs.tag }}
     steps:
-      - name: Check out tagged source
+      - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -37,33 +45,91 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Validate release version and source
-        run: |
-          pnpm release:check "$GITHUB_REF_NAME"
-          pnpm check
-          pnpm check:rust
+      - name: Create Version Packages PR
+        id: changesets
+        uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
+        with:
+          version-script: pnpm version:packages
+          create-github-releases: false
+          push-git-tags: false
+          commit-message: Version Packages
+          pr-title: Version Packages
 
-      - name: Refuse to overwrite a published release
+      - name: Decide whether this merge should package
+        id: gate
+        env:
+          HAS_CHANGESETS: ${{ steps.changesets.outputs.has-changesets }}
+        run: pnpm release:gate
+
+  macos-arm64:
+    name: macOS arm64
+    needs: version
+    if: |
+      always() && !cancelled() && (
+        (needs.version.result == 'skipped' && startsWith(github.ref, 'refs/tags/v')) ||
+        (needs.version.result == 'success' && needs.version.outputs.should-package == 'true')
+      )
+    runs-on: macos-26
+    environment: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || needs.version.outputs.tag }}
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Skip if this version is already published
+        id: existing
         run: |
+          : "${RELEASE_TAG:?RELEASE_TAG is required}"
           api_error="$RUNNER_TEMP/watt-release-api-error"
           set +e
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" 2>"$api_error")"
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" 2>"$api_error")"
           api_status=$?
           set -e
           if [ "$api_status" -eq 0 ]; then
             if [ "$(jq -r '.draft' <<<"$release_json")" != 'true' ]; then
-              echo "A published release already exists for $GITHUB_REF_NAME" >&2
-              exit 1
+              echo "A published release already exists for $RELEASE_TAG; skipping packaging."
+              echo 'skip=true' >> "$GITHUB_OUTPUT"
+              echo 'WATT_DRAFT_EXISTS=false' >> "$GITHUB_ENV"
+              exit 0
             fi
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
             echo 'WATT_DRAFT_EXISTS=true' >> "$GITHUB_ENV"
           elif grep -q '(HTTP 404)' "$api_error"; then
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
             echo 'WATT_DRAFT_EXISTS=false' >> "$GITHUB_ENV"
           else
             cat "$api_error" >&2
             exit "$api_status"
           fi
 
+      - name: Install pnpm
+        if: steps.existing.outputs.skip != 'true'
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Install Node.js
+        if: steps.existing.outputs.skip != 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+
+      - name: Install dependencies
+        if: steps.existing.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release version and source
+        if: steps.existing.outputs.skip != 'true'
+        run: |
+          pnpm release:check "$RELEASE_TAG"
+          pnpm check
+          pnpm check:rust
+
       - name: Validate Infisical configuration
+        if: steps.existing.outputs.skip != 'true'
         env:
           INFISICAL_IDENTITY_ID: ${{ vars.INFISICAL_IDENTITY_ID }}
           INFISICAL_PROJECT_SLUG: ${{ vars.INFISICAL_PROJECT_SLUG }}
@@ -76,6 +142,7 @@ jobs:
           : "${INFISICAL_SECRET_PATH:?release environment variable INFISICAL_SECRET_PATH is required}"
 
       - name: Fetch Apple credentials from Infisical
+        if: steps.existing.outputs.skip != 'true'
         uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
@@ -88,6 +155,7 @@ jobs:
           domain: ${{ vars.INFISICAL_DOMAIN || 'https://app.infisical.com' }}
 
       - name: Validate Apple credentials
+        if: steps.existing.outputs.skip != 'true'
         run: |
           : "${APPLE_CERTIFICATE:?APPLE_CERTIFICATE is required}"
           : "${APPLE_CERTIFICATE_PASSWORD:?APPLE_CERTIFICATE_PASSWORD is required}"
@@ -97,6 +165,7 @@ jobs:
           : "${APPLE_API_KEY_CONTENT:?APPLE_API_KEY_CONTENT is required}"
 
       - name: Import signing certificate
+        if: steps.existing.outputs.skip != 'true'
         run: |
           umask 077
           certificate="$RUNNER_TEMP/watt-signing.p12"
@@ -116,6 +185,7 @@ jobs:
           echo "APPLE_API_KEY_PATH=$api_key" >> "$GITHUB_ENV"
 
       - name: Package and exercise arm64 sidecar
+        if: steps.existing.outputs.skip != 'true'
         run: |
           pnpm desktop:sidecar
           sidecar='apps/desktop/binaries/watt-desktop-sidecar-aarch64-apple-darwin'
@@ -123,12 +193,14 @@ jobs:
           pnpm desktop:sidecar:smoke
 
       - name: Build and sign GPUI application
+        if: steps.existing.outputs.skip != 'true'
         run: |
           cargo build --manifest-path apps/desktop/Cargo.toml --release --target aarch64-apple-darwin
           pnpm desktop:bundle
           pnpm desktop:app:smoke
 
       - name: Notarize and staple application
+        if: steps.existing.outputs.skip != 'true'
         run: |
           app='apps/desktop/dist/aarch64-apple-darwin/Watt.app'
           archive="$RUNNER_TEMP/Watt.app.zip"
@@ -138,6 +210,7 @@ jobs:
           xcrun stapler validate "$app"
 
       - name: Build, notarize, and staple DMG
+        if: steps.existing.outputs.skip != 'true'
         run: |
           pnpm desktop:dmg
           dmg='apps/desktop/dist/aarch64-apple-darwin/Watt-aarch64.dmg'
@@ -146,6 +219,7 @@ jobs:
           xcrun stapler validate "$dmg"
 
       - name: Verify distribution
+        if: steps.existing.outputs.skip != 'true'
         run: |
           bundle='apps/desktop/dist/aarch64-apple-darwin'
           app="$bundle/Watt.app"
@@ -165,28 +239,38 @@ jobs:
           spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
           release_dir="$RUNNER_TEMP/watt-release"
           mkdir -p "$release_dir"
-          asset="$release_dir/Watt-${GITHUB_REF_NAME}-aarch64.dmg"
+          asset="$release_dir/Watt-${RELEASE_TAG}-aarch64.dmg"
           cp "$dmg" "$asset"
           (cd "$release_dir" && shasum -a 256 "$(basename "$asset")" > "$(basename "$asset").sha256")
 
       - name: Attest release assets
+        if: steps.existing.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/watt-release/*
 
       - name: Create or update draft release
+        if: steps.existing.outputs.skip != 'true'
         run: |
           release_dir="$RUNNER_TEMP/watt-release"
-          if [ "$WATT_DRAFT_EXISTS" = 'true' ]; then
-            gh release upload "$GITHUB_REF_NAME" "$release_dir"/* --clobber
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git rev-parse -q --verify "refs/tags/$RELEASE_TAG"; then
+            create_args=(--verify-tag)
           else
-            gh release create "$GITHUB_REF_NAME" "$release_dir"/* \
-              --verify-tag \
+            git tag -a "$RELEASE_TAG" -m "Watt $RELEASE_TAG"
+            create_args=(--target "$GITHUB_SHA")
+          fi
+          if [ "$WATT_DRAFT_EXISTS" = 'true' ]; then
+            gh release upload "$RELEASE_TAG" "$release_dir"/* --clobber
+          else
+            gh release create "$RELEASE_TAG" "$release_dir"/* \
+              "${create_args[@]}" \
               --draft \
               --generate-notes \
-              --title "Watt $GITHUB_REF_NAME"
+              --title "Watt $RELEASE_TAG"
           fi
-          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          gh release edit "$RELEASE_TAG" --draft=false --latest
 
       - name: Clean signing material
         if: always()

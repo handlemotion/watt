@@ -206,6 +206,7 @@ pub struct Workspace {
 pub struct Session {
     pub id: String,
     pub workspace_id: String,
+    pub runtime: String,
     pub cursor_agent_id: String,
     pub mode: String,
     pub model: Value,
@@ -264,6 +265,8 @@ pub struct CreateSessionInput {
     pub workspace_id: String,
     pub prompt: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
@@ -286,6 +289,7 @@ pub struct DiagnosticOperationFilters {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HostCapabilities {
     pub runtime: String,
+    pub runtimes: Vec<Value>,
     pub modes: Vec<String>,
     pub models: Vec<Value>,
     pub model_catalog: Value,
@@ -470,7 +474,7 @@ fn validate_request(value: &Value) -> Result<(), ProtocolError> {
         "sessions.create" => {
             keys(
                 &["workspaceId", "prompt"],
-                &["model", "mode", "executionPolicy"],
+                &["runtime", "model", "mode", "executionPolicy"],
             )?;
             id("workspaceId")?;
             string("prompt")?;
@@ -490,6 +494,14 @@ fn validate_request(value: &Value) -> Result<(), ProtocolError> {
                 return Err(ProtocolError::new(
                     "invalid_params",
                     "mode must be agent or plan",
+                ));
+            }
+            if let Some(runtime) = params.get("runtime").and_then(Value::as_str)
+                && !matches!(runtime, "cursor-local" | "codex-local")
+            {
+                return Err(ProtocolError::new(
+                    "invalid_params",
+                    "runtime must be cursor-local or codex-local",
                 ));
             }
             Ok(())

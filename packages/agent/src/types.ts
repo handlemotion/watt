@@ -2,6 +2,7 @@ export const DEFAULT_SETTING_SOURCES = ["project", "user", "plugins"] as const;
 
 export type SettingSource = (typeof DEFAULT_SETTING_SOURCES)[number];
 export type AgentMode = "agent" | "plan";
+export type AgentRuntimeId = "cursor-local" | "codex-local";
 
 export type ModelParameterValue = { id: string; value: string };
 export type ModelSelection = { id: string; params: ModelParameterValue[] };

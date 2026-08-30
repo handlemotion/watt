@@ -61,6 +61,7 @@ function fakeHost(): TransportHost {
   const session: Session = {
     id: ids.session,
     workspaceId: ids.workspace,
+    runtime: "cursor-local",
     cursorAgentId: "cursor-agent",
     mode: "agent",
     model: { id: "composer-2.5", params: [] },
@@ -86,6 +87,7 @@ function fakeHost(): TransportHost {
     async capabilities() {
       return {
         runtime: "cursor-local",
+        runtimes: [],
         modes: ["agent", "plan"],
         models: [],
         modelCatalog: {

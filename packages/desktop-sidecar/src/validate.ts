@@ -164,10 +164,20 @@ export function assertMethodParams(method: HostMethod, params: unknown): void {
       assertKeys(
         params,
         ["workspaceId", "prompt"],
-        ["model", "mode", "executionPolicy"],
+        ["runtime", "model", "mode", "executionPolicy"],
       );
       assertId(params.workspaceId, "workspaceId");
       assertString(params.prompt, "prompt");
+      if (
+        params.runtime !== undefined &&
+        params.runtime !== "cursor-local" &&
+        params.runtime !== "codex-local"
+      ) {
+        throw new ProtocolError(
+          "runtime must be cursor-local or codex-local",
+          "invalid_params",
+        );
+      }
       if (params.model !== undefined && !isObject(params.model)) {
         throw new ProtocolError("model must be an object", "invalid_params");
       }

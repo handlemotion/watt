@@ -1,6 +1,7 @@
 import type {
   AgentEvent,
   AgentMode,
+  AgentRuntimeId,
   CustomTool,
   ExecutionPolicy,
   ExecutionPolicyInput,
@@ -24,6 +25,7 @@ export type Workspace = {
 export type Session = {
   id: string;
   workspaceId: string;
+  runtime: AgentRuntimeId;
   cursorAgentId: string;
   mode: AgentMode;
   model: ModelSelection;
@@ -44,21 +46,34 @@ export type ModelCatalogState =
       error: { message: string; code?: string };
     };
 
-export type HostCapabilities = {
-  runtime: "cursor-local";
+export type ExecutionPolicyControl =
+  | "autoReview"
+  | "sandbox"
+  | "agentRetries"
+  | "toolAllowlist"
+  | "toolDenylist"
+  | "settingSources";
+
+export type RuntimeCapabilities = {
+  id: AgentRuntimeId;
   modes: AgentMode[];
   models: ModelCapability[];
   modelCatalog: ModelCatalogState;
   executionPolicy: {
     defaults: ExecutionPolicy;
-    controls: Array<
-      | "autoReview"
-      | "sandbox"
-      | "agentRetries"
-      | "toolAllowlist"
-      | "toolDenylist"
-      | "settingSources"
-    >;
+    controls: ExecutionPolicyControl[];
+  };
+};
+
+export type HostCapabilities = {
+  runtime: "cursor-local";
+  runtimes: RuntimeCapabilities[];
+  modes: AgentMode[];
+  models: ModelCapability[];
+  modelCatalog: ModelCatalogState;
+  executionPolicy: {
+    defaults: ExecutionPolicy;
+    controls: ExecutionPolicyControl[];
   };
 };
 
@@ -197,6 +212,7 @@ export type CreateHostOptions = {
   apiKey?: string;
   git?: GitService;
   agent?: WattAgent;
+  codexAgent?: WattAgent;
   executionPolicy?: ExecutionPolicyInput;
   customTools?: CustomTool[];
 };
@@ -231,6 +247,7 @@ export type Host = {
   sessions: {
     create: (input: {
       workspaceId: string;
+      runtime?: AgentRuntimeId;
       model?: ModelSelection;
       mode?: AgentMode;
       prompt: string;

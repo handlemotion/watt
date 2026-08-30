@@ -151,6 +151,7 @@ describe("CLI host lifetime", () => {
     expect(instance.sessions.create).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
       prompt: "plan it",
+      runtime: "cursor-local",
       model: {
         id: "model-a",
         params: [
@@ -161,6 +162,57 @@ describe("CLI host lifetime", () => {
       mode: "plan",
     });
     expect(instance.close).toHaveBeenCalledOnce();
+  });
+
+  it("maps --runtime chatgpt to the Codex local runtime", async () => {
+    const instance = host();
+    vi.mocked(instance.sessions.create).mockResolvedValue({
+      session: {} as never,
+      run: { id: "run-1" } as never,
+    });
+    vi.mocked(instance.runs.attach).mockReturnValue({
+      async *[Symbol.asyncIterator]() {},
+    });
+    mocked.createHost.mockResolvedValue(instance);
+
+    await runCli([
+      "node",
+      "watt",
+      "agent",
+      "send",
+      "--workspace",
+      "workspace-1",
+      "--prompt",
+      "go",
+      "--runtime",
+      "chatgpt",
+    ]);
+
+    expect(instance.sessions.create).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      prompt: "go",
+      runtime: "codex-local",
+      model: undefined,
+      mode: "agent",
+    });
+  });
+
+  it("rejects an invalid --runtime before opening a Host", async () => {
+    await expect(
+      runCli([
+        "node",
+        "watt",
+        "agent",
+        "send",
+        "--workspace",
+        "workspace-1",
+        "--prompt",
+        "go",
+        "--runtime",
+        "openai",
+      ]),
+    ).rejects.toThrow("invalid --runtime");
+    expect(mocked.createHost).not.toHaveBeenCalled();
   });
 
   it("rejects malformed, duplicate, and model-less parameters before opening a Host", async () => {

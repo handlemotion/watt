@@ -9,7 +9,8 @@ use std::{
 
 use directories::BaseDirs;
 use gpui::{
-    App, Application, Bounds, Timer, TitlebarOptions, WindowBounds, WindowOptions, prelude::*, size,
+    App, Application, Bounds, Timer, TitlebarOptions, WindowBounds, WindowOptions, point,
+    prelude::*, px, size,
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -298,7 +299,7 @@ pub fn run() {
                     titlebar: Some(TitlebarOptions {
                         title: Some("Watt".into()),
                         appears_transparent: true,
-                        traffic_light_position: None,
+                        traffic_light_position: Some(point(px(16.0), px(13.0))),
                     }),
                     ..Default::default()
                 },

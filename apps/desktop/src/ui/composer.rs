@@ -81,23 +81,23 @@ fn ghost_plus() -> impl IntoElement {
     div()
         .flex()
         .flex_none()
-        .size(px(28.0))
+        .size(theme::ICON_HIT)
         .items_center()
         .justify_center()
         .overflow_hidden()
         .rounded(px(99.0))
-        .child(Icon::new(IconName::Plus18).size(px(18.0)))
+        .child(Icon::new(IconName::Plus14))
 }
 
 fn filled_plus() -> impl IntoElement {
     div()
         .flex()
         .flex_none()
-        .size(px(28.0))
+        .size(theme::ICON_HIT)
         .items_center()
         .justify_center()
         .rounded(px(99.0))
         .bg(theme::plus_button())
         .overflow_hidden()
-        .child(Icon::new(IconName::Plus18).size(px(18.0)))
+        .child(Icon::new(IconName::Plus14))
 }

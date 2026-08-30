@@ -1,4 +1,4 @@
-use gpui::{App, IntoElement, Pixels, RenderOnce, Rgba, Window, prelude::*, px, svg};
+use gpui::{App, IntoElement, Pixels, RenderOnce, Rgba, Window, div, prelude::*, svg};
 
 use super::theme;
 
@@ -13,7 +13,6 @@ pub enum IconName {
     ArrowRight,
     Cross,
     Plus14,
-    Plus18,
     Console,
     PullRequest,
 }
@@ -30,7 +29,6 @@ impl IconName {
             Self::ArrowRight => "icons/arrow-right.svg",
             Self::Cross => "icons/cross.svg",
             Self::Plus14 => "icons/plus-14.svg",
-            Self::Plus18 => "icons/plus-18.svg",
             Self::Console => "icons/console.svg",
             Self::PullRequest => "icons/pull-request.svg",
         }
@@ -48,14 +46,9 @@ impl Icon {
     pub fn new(name: IconName) -> Self {
         Self {
             name,
-            size: px(18.0),
+            size: theme::ICON_SIZE,
             color: theme::text(),
         }
-    }
-
-    pub fn size(mut self, size: Pixels) -> Self {
-        self.size = size;
-        self
     }
 
     pub fn color(mut self, color: Rgba) -> Self {
@@ -72,4 +65,15 @@ impl RenderOnce for Icon {
             .path(self.name.path())
             .text_color(self.color)
     }
+}
+
+pub fn icon_slot(name: IconName) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_none()
+        .size(theme::ICON_HIT)
+        .items_center()
+        .justify_center()
+        .overflow_hidden()
+        .child(Icon::new(name))
 }

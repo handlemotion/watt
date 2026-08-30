@@ -1,7 +1,7 @@
 use gpui::{App, IntoElement, RenderOnce, Window, div, prelude::*, px};
 
 use super::{
-    icon::{Icon, IconName},
+    icon::{IconName, icon_slot},
     text::text,
     theme,
 };
@@ -109,7 +109,7 @@ fn nav_row(icon: IconName, label: &'static str) -> impl IntoElement {
                 .flex()
                 .items_center()
                 .gap(px(8.0))
-                .child(Icon::new(icon).size(px(18.0)))
+                .child(icon_slot(icon))
                 .child(text(14.0, theme::text(), label)),
         )
 }
@@ -128,7 +128,7 @@ fn workspace_row(label: &'static str) -> impl IntoElement {
                 .flex()
                 .items_center()
                 .gap(px(8.0))
-                .child(div().flex_none().size(px(18.0)).rounded(px(4.0)))
+                .child(div().flex_none().size(theme::ICON_HIT).rounded(px(4.0)))
                 .child(text(14.0, theme::text(), label)),
         )
 }

@@ -7,10 +7,12 @@ export {
 } from "./errors.js";
 export type {
   CreateHostOptions,
+  ExecutionPolicyControl,
   Host,
   HostEvent,
   HostCapabilities,
   ModelCatalogState,
+  RuntimeCapabilities,
   Project,
   ProjectReconciliation,
   ReconciliationEntry,

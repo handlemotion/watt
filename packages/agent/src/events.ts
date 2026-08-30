@@ -148,6 +148,58 @@ export function mapUnknownSdkMessage(value: unknown): AgentEvent[] {
   return message ? mapSdkMessage(message) : [];
 }
 
+export function asAgentEvent(value: unknown): AgentEvent | null {
+  if (typeof value !== "object" || value === null || !("type" in value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  switch (record.type) {
+    case "text_delta":
+      return typeof record.text === "string"
+        ? { type: "text_delta", text: record.text }
+        : null;
+    case "tool_call":
+      return typeof record.callId === "string" &&
+        typeof record.name === "string"
+        ? {
+            type: "tool_call",
+            callId: record.callId,
+            name: record.name,
+            args: record.args,
+          }
+        : null;
+    case "tool_result":
+      return typeof record.callId === "string" &&
+        typeof record.name === "string" &&
+        typeof record.ok === "boolean"
+        ? {
+            type: "tool_result",
+            callId: record.callId,
+            name: record.name,
+            result: record.result,
+            ok: record.ok,
+          }
+        : null;
+    case "status":
+      return typeof record.status === "string" &&
+        (record.message === undefined || typeof record.message === "string")
+        ? {
+            type: "status",
+            status: record.status,
+            ...(typeof record.message === "string"
+              ? { message: record.message }
+              : {}),
+          }
+        : null;
+    case "error":
+      return typeof record.message === "string"
+        ? { type: "error", message: record.message }
+        : null;
+    default:
+      return null;
+  }
+}
+
 export function assertAgentEvent(event: AgentEvent): AgentEvent {
   switch (event.type) {
     case "text_delta":

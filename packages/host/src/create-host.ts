@@ -3,9 +3,12 @@ import path from "node:path";
 
 import {
   createAgent,
+  createCodexRuntime,
   createSdkRuntime,
+  isAgentError,
   normalizeExecutionPolicy,
   type AgentEvent,
+  type AgentRuntimeId,
   type CustomTool,
   type ExecutionPolicy,
   type WattAgent,
@@ -37,12 +40,14 @@ import { assertSlug } from "./slug.js";
 import { createState, type StoredRun } from "./state.js";
 import type {
   CreateHostOptions,
+  ExecutionPolicyControl,
   Host,
   HostEvent,
   HostCapabilities,
   Project,
   Run,
   RunResult,
+  RuntimeCapabilities,
   Session,
   Workspace,
   WorkspaceOperation,
@@ -54,6 +59,17 @@ function now(): number {
 }
 
 const DEFAULT_LEASE_TIMEOUT_MS = 5_000;
+
+function toHostAgentError(error: unknown): never {
+  if (
+    isAgentError(error) &&
+    (error.code === "codex_auth_unavailable" ||
+      error.code === "mode_unsupported")
+  ) {
+    throw new HostError(error.message, error.code, { cause: error });
+  }
+  throw error;
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -139,6 +155,18 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
   const agent: WattAgent =
     options.agent ??
     createAgent({ runtime: createSdkRuntime(), apiKey: options.apiKey });
+  const codexAgent: WattAgent =
+    options.codexAgent ?? createAgent({ runtime: createCodexRuntime() });
+
+  const CURSOR_POLICY_CONTROLS: ExecutionPolicyControl[] = [
+    "autoReview",
+    "sandbox",
+    "agentRetries",
+    "toolAllowlist",
+    "toolDenylist",
+    "settingSources",
+  ];
+  const CODEX_POLICY_CONTROLS: ExecutionPolicyControl[] = ["sandbox"];
 
   let closing = false;
   let closed = false;
@@ -158,36 +186,49 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
     }
   }
 
-  async function discoverCapabilities(): Promise<HostCapabilities> {
+  function agentFor(runtime: AgentRuntimeId): WattAgent {
+    return runtime === "codex-local" ? codexAgent : agent;
+  }
+
+  function parseRuntime(value: string | undefined): AgentRuntimeId {
+    if (value === undefined || value === "cursor-local") return "cursor-local";
+    if (value === "codex-local") return "codex-local";
+    throw new HostError(
+      `invalid runtime: ${value}; expected cursor-local or codex-local`,
+      "invalid_runtime",
+    );
+  }
+
+  async function discoverRuntime(
+    id: AgentRuntimeId,
+    runtimeAgent: WattAgent,
+    modes: RuntimeCapabilities["modes"],
+    controls: ExecutionPolicyControl[],
+    cacheKey: "cursor_models" | "codex_models",
+  ): Promise<RuntimeCapabilities> {
+    const policy = {
+      defaults: normalizeExecutionPolicy({}, defaultExecutionPolicy),
+      controls,
+    };
     try {
-      const models = parseModelCatalog(await agent.listModels());
+      const models = parseModelCatalog(await runtimeAgent.listModels());
       const fetchedAt = now();
-      state.putCapabilityCache(models, fetchedAt);
+      state.putCapabilityCache(models, fetchedAt, cacheKey);
       return {
-        runtime: "cursor-local",
-        modes: ["agent", "plan"],
+        id,
+        modes,
         models,
         modelCatalog: { status: "live", fetchedAt },
-        executionPolicy: {
-          defaults: normalizeExecutionPolicy({}, defaultExecutionPolicy),
-          controls: [
-            "autoReview",
-            "sandbox",
-            "agentRetries",
-            "toolAllowlist",
-            "toolDenylist",
-            "settingSources",
-          ],
-        },
+        executionPolicy: policy,
       };
     } catch (error) {
       const catalogError = sanitizedCatalogError(error);
-      const cached = state.getCapabilityCache();
+      const cached = state.getCapabilityCache(cacheKey);
       if (cached) {
         try {
           return {
-            runtime: "cursor-local",
-            modes: ["agent", "plan"],
+            id,
+            modes,
             models: parseModelCatalog(
               JSON.parse(cached.payloadJson) as unknown,
             ),
@@ -196,44 +237,51 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
               fetchedAt: cached.fetchedAt,
               error: catalogError,
             },
-            executionPolicy: {
-              defaults: normalizeExecutionPolicy({}, defaultExecutionPolicy),
-              controls: [
-                "autoReview",
-                "sandbox",
-                "agentRetries",
-                "toolAllowlist",
-                "toolDenylist",
-                "settingSources",
-              ],
-            },
+            executionPolicy: policy,
           };
         } catch {
           // A corrupt cache is unavailable rather than trusted as capability data.
         }
       }
       return {
-        runtime: "cursor-local",
-        modes: ["agent", "plan"],
+        id,
+        modes,
         models: [],
         modelCatalog: {
           status: "unavailable",
           fetchedAt: null,
           error: catalogError,
         },
-        executionPolicy: {
-          defaults: normalizeExecutionPolicy({}, defaultExecutionPolicy),
-          controls: [
-            "autoReview",
-            "sandbox",
-            "agentRetries",
-            "toolAllowlist",
-            "toolDenylist",
-            "settingSources",
-          ],
-        },
+        executionPolicy: policy,
       };
     }
+  }
+
+  async function discoverCapabilities(): Promise<HostCapabilities> {
+    const [cursor, codex] = await Promise.all([
+      discoverRuntime(
+        "cursor-local",
+        agent,
+        ["agent", "plan"],
+        CURSOR_POLICY_CONTROLS,
+        "cursor_models",
+      ),
+      discoverRuntime(
+        "codex-local",
+        codexAgent,
+        ["agent"],
+        CODEX_POLICY_CONTROLS,
+        "codex_models",
+      ),
+    ]);
+    return {
+      runtime: "cursor-local",
+      runtimes: [cursor, codex],
+      modes: cursor.modes,
+      models: cursor.models,
+      modelCatalog: cursor.modelCatalog,
+      executionPolicy: cursor.executionPolicy,
+    };
   }
 
   function capabilities(): Promise<HostCapabilities> {
@@ -243,15 +291,22 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
     return catalogRequest;
   }
 
-  async function availableModels() {
+  async function availableModels(runtime: AgentRuntimeId = "cursor-local") {
     const value = await capabilities();
-    if (value.modelCatalog.status === "unavailable") {
+    const entry = value.runtimes.find((item) => item.id === runtime);
+    if (!entry || entry.modelCatalog.status === "unavailable") {
+      const catalogError =
+        entry?.modelCatalog.status === "unavailable"
+          ? entry.modelCatalog.error
+          : { message: "model catalog is unavailable" };
       throw new HostError(
-        value.modelCatalog.error.message,
-        "model_catalog_unavailable",
+        catalogError.message,
+        catalogError.code === "codex_auth_unavailable"
+          ? "codex_auth_unavailable"
+          : "model_catalog_unavailable",
       );
     }
-    return value.models;
+    return entry.models;
   }
 
   function requireProject(id: string): Project {
@@ -339,15 +394,17 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
   ): Promise<WattSessionHandle> {
     const existing = sessionHandles.get(session.id);
     if (existing) return existing;
-    const handle = await agent.resume({
-      cwd: workspace.worktreePath,
-      model: session.model,
-      mode: session.mode,
-      executionPolicy: session.executionPolicy,
-      customTools,
-      cursorAgentId: session.cursorAgentId,
-      workspace: workspaceInfo(workspace),
-    });
+    const handle = await agentFor(session.runtime)
+      .resume({
+        cwd: workspace.worktreePath,
+        model: session.model,
+        mode: session.mode,
+        executionPolicy: session.executionPolicy,
+        customTools,
+        cursorAgentId: session.cursorAgentId,
+        workspace: workspaceInfo(workspace),
+      })
+      .catch(toHostAgentError);
     sessionHandles.set(session.id, handle);
     return handle;
   }
@@ -451,7 +508,7 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
 
     try {
       if (stored.cursorRunId) {
-        const recovered = await agent.getRun({
+        const recovered = await agentFor(session.runtime).getRun({
           cursorRunId: stored.cursorRunId,
           cwd: workspace.worktreePath,
         });
@@ -462,7 +519,10 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
         throw new Error("queued run is missing its prompt");
       }
       if (!catalogValidatedRuns.delete(stored.value.id)) {
-        resolveModelSelection(session.model, await availableModels());
+        resolveModelSelection(
+          session.model,
+          await availableModels(session.runtime),
+        );
       }
       const handle = await sessionHandle(session, workspace);
       const started = await handle.send(stored.prompt, {
@@ -474,6 +534,16 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
       }
       notifyRun(stored.value.id);
       await consumeRun(stored, started, workspace);
+      const latestHandle = sessionHandles.get(session.id);
+      if (
+        latestHandle &&
+        latestHandle.cursorAgentId !== session.cursorAgentId
+      ) {
+        state.updateSessionCursorAgentId(
+          session.id,
+          latestHandle.cursorAgentId,
+        );
+      }
     } catch (error) {
       finishRun(
         stored.value.id,
@@ -484,9 +554,16 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
             : error instanceof HostError &&
                 (error.code === "model_catalog_unavailable" ||
                   error.code === "model_unavailable" ||
-                  error.code === "unsupported_model_parameter")
+                  error.code === "unsupported_model_parameter" ||
+                  error.code === "mode_unsupported" ||
+                  error.code === "codex_auth_unavailable" ||
+                  error.code === "invalid_runtime")
               ? error.code
-              : "run_dispatch_failed",
+              : isAgentError(error) &&
+                  (error.code === "mode_unsupported" ||
+                    error.code === "codex_auth_unavailable")
+                ? error.code
+                : "run_dispatch_failed",
           error,
         ),
       );
@@ -1149,28 +1226,38 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
         if (workspace.archivedAt !== null) {
           throw new HostError("workspace is archived", "workspace_archived");
         }
+        const runtime = parseRuntime(input.runtime);
+        const mode = input.mode ?? "agent";
+        if (runtime === "codex-local" && mode === "plan") {
+          throw new HostError(
+            "Codex runtime supports agent mode only",
+            "mode_unsupported",
+          );
+        }
         const model = resolveModelSelection(
           input.model,
-          await availableModels(),
+          await availableModels(runtime),
         );
         assertOpen();
-        const mode = input.mode ?? "agent";
         const executionPolicy = normalizeExecutionPolicy(
           input.executionPolicy,
           defaultExecutionPolicy,
         );
-        const handle = await agent.create({
-          cwd: workspace.worktreePath,
-          model,
-          mode,
-          executionPolicy,
-          customTools,
-          workspace: workspaceInfo(workspace),
-        });
+        const handle = await agentFor(runtime)
+          .create({
+            cwd: workspace.worktreePath,
+            model,
+            mode,
+            executionPolicy,
+            customTools,
+            workspace: workspaceInfo(workspace),
+          })
+          .catch(toHostAgentError);
         assertOpen();
         const session: Session = {
           id: ulid(),
           workspaceId: workspace.id,
+          runtime,
           cursorAgentId: handle.cursorAgentId,
           mode,
           model,
@@ -1198,7 +1285,10 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
         if (workspace.archivedAt !== null) {
           throw new HostError("workspace is archived", "workspace_archived");
         }
-        resolveModelSelection(session.model, await availableModels());
+        resolveModelSelection(
+          session.model,
+          await availableModels(session.runtime),
+        );
         assertOpen();
         const run: Run = {
           id: ulid(),

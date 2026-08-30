@@ -1,10 +1,14 @@
-import type { CursorRun } from "./types.js";
-import { assertAgentEvent, mapUnknownSdkMessage } from "./events.js";
+import {
+  assertAgentEvent,
+  asAgentEvent,
+  mapUnknownSdkMessage,
+} from "./events.js";
 import { normalizeExecutionPolicy } from "./policy.js";
 import { mergeCustomTools } from "./tools.js";
 import {
   type CreateAgentInput,
   type CursorAgentHandle,
+  type CursorRun,
   type CursorRuntime,
   type ModelSelection,
   type ResumeAgentInput,
@@ -31,6 +35,11 @@ function wrapRun(run: CursorRun): WattRun {
     async *stream() {
       try {
         for await (const message of run.stream()) {
+          const alreadyMapped = asAgentEvent(message);
+          if (alreadyMapped) {
+            yield alreadyMapped;
+            continue;
+          }
           for (const event of mapUnknownSdkMessage(message)) {
             yield assertAgentEvent(event);
           }
@@ -54,7 +63,9 @@ function wrapRun(run: CursorRun): WattRun {
 
 function bindHandle(handle: CursorAgentHandle): WattSessionHandle {
   return {
-    cursorAgentId: handle.agentId,
+    get cursorAgentId() {
+      return handle.agentId;
+    },
     async send(prompt, sendOptions) {
       return wrapRun(await handle.send(prompt, sendOptions));
     },

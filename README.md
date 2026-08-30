@@ -25,6 +25,6 @@ pnpm desktop:sidecar
 pnpm desktop:sidecar:smoke
 ```
 
-After building the sidecar, run the minimal GPUI shell with `cargo run --manifest-path apps/desktop/Cargo.toml`. It intentionally exposes only Host readiness; future views should use the existing typed Rust bridge rather than introducing another transport.
+After `pnpm install`, start the GPUI app with `pnpm desktop`. It builds the sidecar on first run if needed. Future views should use the existing typed Rust bridge rather than introducing another transport.
 
-`pnpm desktop:build` produces an ad-hoc-signed GPUI app and DMG on an Apple Silicon Mac, including real packaged Host lifecycle probes. Developer ID signing and notarization happen only in the protected GitHub `release` environment.
+`pnpm desktop:build` produces an ad-hoc-signed GPUI app and DMG on an Apple Silicon Mac, including real packaged Host lifecycle probes. Developer ID signing and notarization happen only in the protected GitHub `release` environment, and only after a Version Packages PR merges. Add a changeset with `pnpm changeset` in any PR that should ship.

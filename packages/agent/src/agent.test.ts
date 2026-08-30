@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAgent } from "./create-agent.js";
-import { mapSdkMessage, mapUnknownSdkMessage } from "./events.js";
+import { asAgentEvent, mapSdkMessage, mapUnknownSdkMessage } from "./events.js";
 import { createSdkRuntime } from "./sdk-runtime.js";
 import { WATT_WORKSPACE_INFO_TOOL } from "./tools.js";
 import type {
@@ -278,6 +278,30 @@ describe("mapSdkMessage", () => {
       }),
     ).toEqual([]);
     expect(mapUnknownSdkMessage({ type: "status", status: 1 })).toEqual([]);
+  });
+
+  it("recognizes Watt AgentEvents without treating SDK tool_call as one", () => {
+    expect(
+      asAgentEvent({
+        type: "tool_call",
+        callId: "c1",
+        name: "read",
+        args: null,
+      }),
+    ).toEqual({
+      type: "tool_call",
+      callId: "c1",
+      name: "read",
+      args: null,
+    });
+    expect(
+      asAgentEvent({
+        type: "tool_call",
+        call_id: "c1",
+        name: "read",
+        status: "running",
+      }),
+    ).toBeNull();
   });
 });
 
