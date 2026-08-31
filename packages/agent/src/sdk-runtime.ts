@@ -75,6 +75,7 @@ function modelCapability(model: SDKModel): ModelCapability {
 
 type SdkRunLike = {
   id: string;
+  agentId: string;
   stream: () => AsyncIterable<unknown>;
   wait: () => Promise<{
     status: string;
@@ -108,7 +109,10 @@ function mapRunResult(
   return mapped;
 }
 
-function wrapSdkRun(run: SdkRunLike): CursorRun {
+function wrapSdkRun(
+  run: SdkRunLike,
+  detach: () => void | Promise<void>,
+): CursorRun {
   return {
     cursorRunId: run.id,
     async *stream() {
@@ -120,12 +124,15 @@ function wrapSdkRun(run: SdkRunLike): CursorRun {
     async wait() {
       return mapRunResult(await run.wait());
     },
+    async detach() {
+      await detach();
+    },
     cancel: () => run.cancel(),
   };
 }
 
 function wrapSdkAgent(
-  agent: Pick<SDKAgent, "agentId" | "send">,
+  agent: SDKAgent,
   input: CreateRuntimeInput,
 ): CursorAgentHandle {
   return {
@@ -138,6 +145,7 @@ function wrapSdkAgent(
           mode: input.mode,
           local: { customTools: toSdkCustomTools(input.customTools) },
         }),
+        () => agent[Symbol.asyncDispose](),
       );
     },
   };
@@ -188,7 +196,12 @@ export function createSdkRuntime(): CursorRuntime {
         runtime: "local",
         cwd: input.cwd,
       });
-      return wrapSdkRun(run);
+      return wrapSdkRun(run, async () => {
+        const agent = await Agent.resume(run.agentId, {
+          local: { cwd: input.cwd },
+        });
+        await agent[Symbol.asyncDispose]();
+      });
     },
   };
 }

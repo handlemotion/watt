@@ -30,7 +30,14 @@ jobs:
           node-version: 22.13.0
           cache: pnpm
 
+      - name: Validate Central Icons license
+        env:
+          CENTRAL_LICENSE_KEY: ${{ secrets.CENTRAL_LICENSE_KEY }}
+        run: ': "${CENTRAL_LICENSE_KEY:?repository secret CENTRAL_LICENSE_KEY is required}"'
+
       - name: Install dependencies
+        env:
+          CENTRAL_LICENSE_KEY: ${{ secrets.CENTRAL_LICENSE_KEY }}
         run: pnpm install --frozen-lockfile
 
       - name: Run Node.js checks
@@ -52,7 +59,14 @@ jobs:
           node-version: 22.13.0
           cache: pnpm
 
+      - name: Validate Central Icons license
+        env:
+          CENTRAL_LICENSE_KEY: ${{ secrets.CENTRAL_LICENSE_KEY }}
+        run: ': "${CENTRAL_LICENSE_KEY:?repository secret CENTRAL_LICENSE_KEY is required}"'
+
       - name: Install dependencies
+        env:
+          CENTRAL_LICENSE_KEY: ${{ secrets.CENTRAL_LICENSE_KEY }}
         run: pnpm install --frozen-lockfile
 
       - name: Run Rust checks

@@ -170,11 +170,14 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
 
   let closing = false;
   let closed = false;
-  let closePromise: Promise<void> | undefined;
+  let suspending = false;
+  let shutdownPromise: Promise<void> | undefined;
   const schedulers = new Map<string, Promise<void>>();
   const sessionHandles = new Map<string, WattSessionHandle>();
   const activeRuns = new Map<string, WattRun>();
+  const activeRunControllers = new Map<string, AbortController>();
   const cancelRequested = new Set<string>();
+  const suspendCancelledRuns = new Set<string>();
   const runVersions = new Map<string, number>();
   const runWaiters = new Map<string, Set<() => void>>();
   const catalogValidatedRuns = new Set<string>();
@@ -452,6 +455,21 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
     return value as HostEvent;
   }
 
+  async function suspendRun(
+    stored: StoredRun,
+    run: WattRun,
+    controller: AbortController,
+  ): Promise<void> {
+    const session = requireSession(stored.value.sessionId);
+    if (session.runtime === "codex-local") {
+      cancelRequested.add(stored.value.id);
+      suspendCancelledRuns.add(stored.value.id);
+      await run.cancel().catch(() => undefined);
+      return;
+    }
+    controller.abort();
+  }
+
   async function consumeRun(
     stored: StoredRun,
     run: WattRun,
@@ -459,13 +477,17 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
   ): Promise<void> {
     state.clearRunEvents(stored.value.id);
     activeRuns.set(stored.value.id, run);
-    if (cancelRequested.has(stored.value.id) || closing) {
+    const controller = new AbortController();
+    activeRunControllers.set(stored.value.id, controller);
+    if (suspending) {
+      await suspendRun(stored, run, controller);
+    } else if (cancelRequested.has(stored.value.id) || closing) {
       await run.cancel().catch(() => undefined);
     }
 
     let sequence = 0;
     try {
-      for await (const event of run.stream()) {
+      for await (const event of run.stream({ signal: controller.signal })) {
         sequence += 1;
         const annotated = {
           ...event,
@@ -482,8 +504,14 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
         );
         notifyRun(stored.value.id);
       }
-      finishRun(stored.value.id, hostResult(stored.value.id, await run.wait()));
+      if (!suspending || suspendCancelledRuns.has(stored.value.id)) {
+        finishRun(
+          stored.value.id,
+          hostResult(stored.value.id, await run.wait()),
+        );
+      }
     } catch (error) {
+      if (suspending) return;
       await run.cancel().catch(() => undefined);
       finishRun(
         stored.value.id,
@@ -491,7 +519,9 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
       );
     } finally {
       activeRuns.delete(stored.value.id);
+      activeRunControllers.delete(stored.value.id);
       cancelRequested.delete(stored.value.id);
+      suspendCancelledRuns.delete(stored.value.id);
     }
   }
 
@@ -958,16 +988,22 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
     }
   }
 
-  const host: Host = {
-    async capabilities() {
-      assertOpen();
-      return capabilities();
-    },
-    close() {
-      if (closePromise) return closePromise;
-      closing = true;
-      closePromise = (async () => {
-        try {
+  function shutdown(mode: "close" | "suspend"): Promise<void> {
+    if (shutdownPromise) return shutdownPromise;
+    closing = true;
+    suspending = mode === "suspend";
+    shutdownPromise = (async () => {
+      try {
+        if (suspending) {
+          const cancellations: Promise<void>[] = [];
+          for (const [runId, run] of activeRuns) {
+            const stored = state.getRun(runId);
+            const controller = activeRunControllers.get(runId);
+            if (!stored || !controller) continue;
+            cancellations.push(suspendRun(stored, run, controller));
+          }
+          await Promise.all(cancellations);
+        } else {
           for (const stored of state.listNonterminalRuns()) {
             if (stored.internalStatus !== "queued") {
               cancelRequested.add(stored.value.id);
@@ -978,18 +1014,31 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
               run.cancel().catch(() => undefined),
             ),
           );
-          await Promise.all([...schedulers.values()]);
-        } finally {
-          for (const runId of runWaiters.keys()) notifyRun(runId);
-          try {
-            database.close();
-          } finally {
-            closed = true;
-            await hostLease.release();
-          }
         }
-      })();
-      return closePromise;
+        await Promise.all([...schedulers.values()]);
+      } finally {
+        for (const runId of runWaiters.keys()) notifyRun(runId);
+        try {
+          database.close();
+        } finally {
+          closed = true;
+          await hostLease.release();
+        }
+      }
+    })();
+    return shutdownPromise;
+  }
+
+  const host: Host = {
+    async capabilities() {
+      assertOpen();
+      return capabilities();
+    },
+    close() {
+      return shutdown("close");
+    },
+    suspend() {
+      return shutdown("suspend");
     },
     projects: {
       async register(repoRoot) {

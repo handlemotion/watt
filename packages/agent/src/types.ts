@@ -120,6 +120,7 @@ export type SdkStreamMessage =
 export type CursorRun = {
   cursorRunId: string;
   stream: () => AsyncIterable<unknown>;
+  detach?: () => Promise<void>;
   wait: () => Promise<WattRunResult>;
   cancel: () => Promise<void>;
 };
@@ -171,7 +172,7 @@ export type WattRunResult = {
 
 export type WattRun = {
   cursorRunId: string;
-  stream: () => AsyncIterable<AgentEvent>;
+  stream: (options?: { signal?: AbortSignal }) => AsyncIterable<AgentEvent>;
   wait: () => Promise<WattRunResult>;
   cancel: () => Promise<void>;
 };

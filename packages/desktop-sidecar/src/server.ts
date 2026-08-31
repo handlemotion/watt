@@ -35,6 +35,7 @@ export type TransportHost = Pick<
   Host,
   | "capabilities"
   | "close"
+  | "suspend"
   | "projects"
   | "workspaces"
   | "sessions"
@@ -239,6 +240,12 @@ export class SidecarServer {
         this.#input.destroy();
         return;
       }
+      if (request.method === "host.suspend") {
+        await this.#shutdown("shutdown", "suspend");
+        await this.#sendResult(request.requestId, { suspended: true });
+        this.#input.destroy();
+        return;
+      }
       const result = await this.#route(request);
       await this.#sendResult(request.requestId, result);
     } catch (error) {
@@ -329,6 +336,7 @@ export class SidecarServer {
       case "runs.attach":
       case "runs.unsubscribe":
       case "host.close":
+      case "host.suspend":
         throw new ProtocolError("method routed incorrectly", "internal_error");
       default: {
         const exhaustive: never = request.method;
@@ -474,7 +482,10 @@ export class SidecarServer {
     return true;
   }
 
-  #shutdown(reason: StreamEndReason): Promise<void> {
+  #shutdown(
+    reason: StreamEndReason,
+    disposition: "close" | "suspend" = "close",
+  ): Promise<void> {
     if (this.#closePromise) return this.#closePromise;
     this.#closing = true;
     this.#closePromise = (async () => {
@@ -485,7 +496,11 @@ export class SidecarServer {
         tasks.push(subscription.task);
       }
       await Promise.allSettled(tasks);
-      await this.#host?.close();
+      if (disposition === "suspend") {
+        await this.#host?.suspend();
+      } else {
+        await this.#host?.close();
+      }
     })();
     return this.#closePromise;
   }

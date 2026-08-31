@@ -22,6 +22,7 @@ pub const CAPABILITIES: &[&str] = &[
     "host.runs.v1",
     "run-stream.v1",
     "graceful-shutdown.v1",
+    "graceful-suspend.v1",
 ];
 
 const SCHEMA_JSON: &str = include_str!("../../../../packages/desktop-sidecar/protocol.schema.json");
@@ -435,7 +436,7 @@ fn validate_request(value: &Value) -> Result<(), ProtocolError> {
             keys(&["id"], &[])?;
             id("id")
         }
-        "projects.list" | "host.capabilities" | "host.close" => keys(&[], &[]),
+        "projects.list" | "host.capabilities" | "host.close" | "host.suspend" => keys(&[], &[]),
         "projects.reconcile" => {
             keys(&["projectId"], &[])?;
             id("projectId")

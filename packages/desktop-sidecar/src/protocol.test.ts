@@ -99,6 +99,7 @@ function fakeHost(): TransportHost {
       } satisfies HostCapabilities;
     },
     async close() {},
+    async suspend() {},
     projects: {
       async register() {
         return project;
@@ -316,6 +317,50 @@ describe("desktop sidecar protocol", () => {
     input.end();
     await serving;
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("suspends the Host through the typed protocol without closing it", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const received: ServerEnvelope[] = [];
+    const decoder = new FrameDecoder();
+    output.on("data", (chunk: Buffer) => {
+      for (const value of decoder.push(chunk))
+        received.push(value as ServerEnvelope);
+    });
+    const host = fakeHost();
+    const close = vi.spyOn(host, "close");
+    const suspend = vi.spyOn(host, "suspend");
+    const serving = serveConnection(input, output, async () => host);
+    input.write(
+      encodeFrame({
+        type: "hello",
+        protocolVersionMin: 1,
+        protocolVersionMax: 1,
+        capabilities: ["graceful-suspend.v1"],
+        host: { stateDir: "/tmp/state", worktreeRoot: "/tmp/trees" },
+      }),
+    );
+    await waitForLength(received, 1);
+    input.write(
+      encodeFrame({
+        type: "request",
+        version: 1,
+        requestId: ids.request,
+        method: "host.suspend",
+        params: {},
+      }),
+    );
+
+    await waitForLength(received, 2);
+    await serving;
+    expect(received[1]).toMatchObject({
+      type: "result",
+      requestId: ids.request,
+      result: { suspended: true },
+    });
+    expect(suspend).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("fails protocol incompatibility before opening the Host", async () => {

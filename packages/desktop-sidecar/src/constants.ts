@@ -14,6 +14,7 @@ export const CAPABILITIES = [
   "host.runs.v1",
   "run-stream.v1",
   "graceful-shutdown.v1",
+  "graceful-suspend.v1",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
