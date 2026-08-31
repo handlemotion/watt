@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const outputDir = path.join(root, "apps", "desktop", "binaries");
+const outputDir = path.join(root, "apps", "desktop", "src-tauri", "binaries");
 const output = path.join(
   outputDir,
   "watt-desktop-sidecar-aarch64-apple-darwin",

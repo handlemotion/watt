@@ -9,6 +9,7 @@ const packagedExecutable = path.join(
   root,
   "apps",
   "desktop",
+  "src-tauri",
   "binaries",
   "watt-desktop-sidecar-aarch64-apple-darwin",
 );

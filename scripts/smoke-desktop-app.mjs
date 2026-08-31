@@ -22,11 +22,11 @@ try {
   for (const smoke of [
     {
       argument: "--host-smoke",
-      expected: "GPUI desktop Host handshake and graceful shutdown passed.",
+      expected: "desktop Host handshake and graceful shutdown passed.",
     },
     {
-      argument: "--gpui-smoke",
-      expected: "GPUI window startup and graceful shutdown passed.",
+      argument: "--window-smoke",
+      expected: "desktop window startup and graceful shutdown passed.",
     },
   ]) {
     const result = spawnSync(executable, [smoke.argument], {

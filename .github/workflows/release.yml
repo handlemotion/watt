@@ -188,14 +188,14 @@ jobs:
         if: steps.existing.outputs.skip != 'true'
         run: |
           pnpm desktop:sidecar
-          sidecar='apps/desktop/binaries/watt-desktop-sidecar-aarch64-apple-darwin'
+          sidecar='apps/desktop/src-tauri/binaries/watt-desktop-sidecar-aarch64-apple-darwin'
           file "$sidecar" | grep 'arm64'
           pnpm desktop:sidecar:smoke
 
-      - name: Build and sign GPUI application
+      - name: Build and sign Tauri application
         if: steps.existing.outputs.skip != 'true'
         run: |
-          cargo build --manifest-path apps/desktop/Cargo.toml --release --target aarch64-apple-darwin
+          pnpm --filter @watt/desktop exec -- tauri build --target aarch64-apple-darwin --bundles app
           pnpm desktop:bundle
           pnpm desktop:app:smoke
 

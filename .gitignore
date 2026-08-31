@@ -27,9 +27,9 @@ out/
 build
 dist
 target
-apps/desktop/binaries/*
-!apps/desktop/binaries/.gitkeep
-
+apps/desktop/src-tauri/binaries/*
+!apps/desktop/src-tauri/binaries/.gitkeep
+apps/desktop/src-tauri/gen/
 
 # Debug
 npm-debug.log*

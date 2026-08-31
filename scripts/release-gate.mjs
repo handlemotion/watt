@@ -9,8 +9,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const VERSION_PATHS = new Set([
   "package.json",
-  "apps/desktop/Cargo.lock",
-  "apps/desktop/Cargo.toml",
+  "apps/desktop/package.json",
+  "apps/desktop/src-tauri/Cargo.lock",
+  "apps/desktop/src-tauri/Cargo.toml",
   "packages/agent/package.json",
   "packages/cli/package.json",
   "packages/desktop-sidecar/package.json",

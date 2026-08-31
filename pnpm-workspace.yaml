@@ -1,6 +1,8 @@
 packages:
+  - "apps/*"
   - "packages/*"
 allowBuilds:
+  "@central-icons-svelte/round-outlined-radius-2-stroke-1.5": true
   better-sqlite3: true
   esbuild: true
 

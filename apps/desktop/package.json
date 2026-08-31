@@ -1,0 +1,29 @@
+{
+  "name": "@watt/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "ui": "vite --open",
+    "build": "vite build",
+    "check-types": "svelte-check --tsconfig ./tsconfig.json",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@tauri-apps/cli": "2.11.4",
+    "svelte": "5.57.0",
+    "svelte-check": "4.7.6",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.2",
+    "vite": "8.2.2"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "central-icons": "npm:@central-icons-svelte/round-outlined-radius-2-stroke-1.5@1.1.315"
+  }
+}

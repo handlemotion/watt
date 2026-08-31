@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@theme {
+  --color-app: #f8f8f8;
+  --color-surface: #ffffff;
+  --color-surface-hover: #ececec;
+  --color-line: #eaeaea;
+  --color-muted: #777777;
+  --color-fg: #000000;
+  --color-unread: #068aef;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --text-nav: 14px;
+  --text-nav--line-height: normal;
+  --text-nav--letter-spacing: -0.42px;
+  --text-meta: 13px;
+  --text-meta--line-height: normal;
+  --text-meta--letter-spacing: -0.39px;
+  --spacing-sidebar: 324px;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+[data-tauri-drag-region] {
+  user-select: none;
+}
+
+button {
+  -webkit-app-region: no-drag;
+}

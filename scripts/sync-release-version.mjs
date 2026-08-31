@@ -33,12 +33,34 @@ export function syncReleaseVersion(
   version = readProductVersion(repoRoot),
 ) {
   const rootManifestPath = path.join(repoRoot, "package.json");
-  const cargoTomlPath = path.join(repoRoot, "apps", "desktop", "Cargo.toml");
-  const cargoLockPath = path.join(repoRoot, "apps", "desktop", "Cargo.lock");
+  const cargoTomlPath = path.join(
+    repoRoot,
+    "apps",
+    "desktop",
+    "src-tauri",
+    "Cargo.toml",
+  );
+  const cargoLockPath = path.join(
+    repoRoot,
+    "apps",
+    "desktop",
+    "src-tauri",
+    "Cargo.lock",
+  );
+  const desktopManifestPath = path.join(
+    repoRoot,
+    "apps",
+    "desktop",
+    "package.json",
+  );
 
   const rootManifest = JSON.parse(readFileSync(rootManifestPath, "utf8"));
   rootManifest.version = version;
   writeJson(rootManifestPath, rootManifest);
+
+  const desktopManifest = JSON.parse(readFileSync(desktopManifestPath, "utf8"));
+  desktopManifest.version = version;
+  writeJson(desktopManifestPath, desktopManifest);
 
   const cargoToml = readFileSync(cargoTomlPath, "utf8");
   writeFileSync(

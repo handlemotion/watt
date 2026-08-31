@@ -1,58 +1,41 @@
-import {
-  chmodSync,
-  copyFileSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, copyFileSync, cpSync, mkdirSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const manifest = JSON.parse(
-  readFileSync(path.join(root, "package.json"), "utf8"),
-);
 const target = process.env.WATT_DESKTOP_TARGET ?? "aarch64-apple-darwin";
 const app = path.join(root, "apps", "desktop", "dist", target, "Watt.app");
-const contents = path.join(app, "Contents");
-const macos = path.join(contents, "MacOS");
-const resources = path.join(contents, "Resources");
-const desktop = path.join(
+const tauriApp = path.join(
   root,
   "apps",
   "desktop",
+  "src-tauri",
   "target",
   target,
   "release",
-  "watt-desktop",
+  "bundle",
+  "macos",
+  "Watt.app",
 );
 const sidecar = path.join(
   root,
   "apps",
   "desktop",
+  "src-tauri",
   "binaries",
   "watt-desktop-sidecar-aarch64-apple-darwin",
 );
 const identity = process.env.APPLE_SIGNING_IDENTITY ?? "-";
 
 rmSync(app, { recursive: true, force: true });
-mkdirSync(macos, { recursive: true });
-mkdirSync(resources, { recursive: true });
-copyFileSync(desktop, path.join(macos, "watt-desktop"));
+mkdirSync(path.dirname(app), { recursive: true });
+cpSync(tauriApp, app, { recursive: true });
+
+const macos = path.join(app, "Contents", "MacOS");
 copyFileSync(sidecar, path.join(macos, "watt-desktop-sidecar"));
-copyFileSync(
-  path.join(root, "apps", "desktop", "assets", "icon.icns"),
-  path.join(resources, "icon.icns"),
-);
 chmodSync(path.join(macos, "watt-desktop"), 0o755);
 chmodSync(path.join(macos, "watt-desktop-sidecar"), 0o755);
-const plist = readFileSync(
-  path.join(root, "apps", "desktop", "Info.plist.in"),
-  "utf8",
-).replaceAll("__WATT_VERSION__", manifest.version);
-writeFileSync(path.join(contents, "Info.plist"), plist);
 
 function codesign(targetPath, entitlements) {
   const args = ["--force", "--options", "runtime"];
@@ -66,7 +49,7 @@ function codesign(targetPath, entitlements) {
 
 codesign(
   path.join(macos, "watt-desktop-sidecar"),
-  path.join(root, "apps", "desktop", "sidecar.entitlements.plist"),
+  path.join(root, "apps", "desktop", "src-tauri", "sidecar.entitlements.plist"),
 );
 codesign(path.join(macos, "watt-desktop"));
 codesign(app);

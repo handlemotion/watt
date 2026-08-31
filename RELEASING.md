@@ -61,7 +61,7 @@ No GitHub Actions secrets are required. The workflow's `id-token: write` permiss
 ## Release a version
 
 1. In the PR that should ship, add a changeset (`pnpm changeset`). Watt versions Host, CLI, sidecar, and desktop together; choose patch or minor unless you are intentionally shipping a breaking change.
-2. Merge that PR to `main`. The Release workflow opens or updates a **Version Packages** PR with changelog and version bumps, including the root `package.json` and `apps/desktop/Cargo.toml`.
+2. Merge that PR to `main`. The Release workflow opens or updates a **Version Packages** PR with changelog and version bumps, including the root `package.json` and `apps/desktop/src-tauri/Cargo.toml`.
 3. Merge **Version Packages**. That merge is what starts signed packaging CI. Optional local acceptance on an Apple Silicon Mac before merging:
 
    ```sh
@@ -70,7 +70,7 @@ No GitHub Actions secrets are required. The workflow's `id-token: write` permiss
    pnpm check:rust
    pnpm desktop:sidecar
    pnpm desktop:sidecar:smoke
-   cargo build --manifest-path apps/desktop/Cargo.toml --release --target aarch64-apple-darwin
+   pnpm --filter @watt/desktop exec -- tauri build --target aarch64-apple-darwin --bundles app
    pnpm desktop:bundle
    pnpm desktop:app:smoke
    pnpm desktop:dmg
@@ -78,7 +78,7 @@ No GitHub Actions secrets are required. The workflow's `id-token: write` permiss
    pnpm release:check vX.Y.Z
    ```
 
-The workflow repeats all checks from a frozen install before requesting credentials, fetches the Apple values from Infisical through OIDC, imports the certificate into a temporary keychain, builds the GPUI executable, packages and signs the app explicitly, runs the packaged GPUI-to-Host lifecycle probe, notarizes and staples the app and DMG, produces `Watt-vX.Y.Z-aarch64.dmg` plus its SHA-256 checksum, records a GitHub artifact attestation, creates `vX.Y.Z` if needed, and publishes a draft release only after every acceptance check succeeds.
+The workflow repeats all checks from a frozen install before requesting credentials, fetches the Apple values from Infisical through OIDC, imports the certificate into a temporary keychain, builds the Tauri executable, packages and signs the app explicitly, runs the packaged Tauri-to-Host lifecycle probe, notarizes and staples the app and DMG, produces `Watt-vX.Y.Z-aarch64.dmg` plus its SHA-256 checksum, records a GitHub artifact attestation, creates `vX.Y.Z` if needed, and publishes a draft release only after every acceptance check succeeds.
 
 Pushing an unpublished `vMAJOR.MINOR.PATCH` tag remains a recovery path if the `main` packaging job did not run.
 

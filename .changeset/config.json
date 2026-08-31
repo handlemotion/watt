@@ -20,5 +20,5 @@
     "tag": false
   },
   "updateInternalDependencies": "patch",
-  "ignore": ["@watt/typescript-config"]
+  "ignore": ["@watt/typescript-config", "@watt/desktop"]
 }
