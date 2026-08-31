@@ -7,13 +7,15 @@
   let {
     worktrees,
     projects,
-    selectedId,
-    onselect,
+    selectedChatId,
+    onselectChat,
+    oncreateChat,
   }: {
     worktrees: Worktree[];
     projects: readonly Project[];
-    selectedId: string | null;
-    onselect: (id: string) => void;
+    selectedChatId: string | null;
+    onselectChat: (id: string) => void;
+    oncreateChat: (worktreeId: string) => void;
   } = $props();
 
   const projectById = $derived.by(() => {
@@ -39,8 +41,9 @@
       <WorktreeGroup
         worktree={group.worktree}
         project={group.project}
-        {selectedId}
-        {onselect}
+        {selectedChatId}
+        {onselectChat}
+        {oncreateChat}
       />
     {/each}
   </div>

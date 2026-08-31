@@ -6,8 +6,13 @@
   --color-surface-hover: #ececec;
   --color-line: #eaeaea;
   --color-muted: #777777;
+  --color-placeholder: #ababab;
   --color-fg: #000000;
   --color-unread: #068aef;
+  --color-composer-border: #e4e4e4;
+  --color-composer-action: #f1f1f1;
+  --color-pr-bg: #d7f2cd;
+  --color-pr-fg: #08bd32;
   --font-sans:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   --text-nav: 14px;
@@ -16,6 +21,9 @@
   --text-meta: 13px;
   --text-meta--line-height: normal;
   --text-meta--letter-spacing: -0.39px;
+  --text-composer: 15px;
+  --text-composer--line-height: normal;
+  --text-composer--letter-spacing: -0.45px;
   --spacing-sidebar: 324px;
 }
 

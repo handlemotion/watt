@@ -14,6 +14,8 @@ export type Chat = {
   id: string;
   name: string;
   unread?: boolean;
+  draft?: string;
+  isNew?: boolean;
 };
 
 export type Worktree = {
@@ -21,5 +23,6 @@ export type Worktree = {
   name: string;
   projectId: string;
   diff?: GitDiff;
+  pullRequest?: string;
   chats: Chat[];
 };

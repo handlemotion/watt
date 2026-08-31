@@ -7,16 +7,24 @@
   let {
     worktree,
     project,
-    selectedId,
-    onselect,
+    selectedChatId,
+    onselectChat,
+    oncreateChat,
   }: {
     worktree: Worktree;
     project: Project;
-    selectedId: string | null;
-    onselect: (id: string) => void;
+    selectedChatId: string | null;
+    onselectChat: (id: string) => void;
+    oncreateChat: (worktreeId: string) => void;
   } = $props();
 
   let open = $state(true);
+
+  $effect(() => {
+    if (worktree.chats.some((chat) => chat.id === selectedChatId)) {
+      open = true;
+    }
+  });
 </script>
 
 <div class="flex flex-col gap-1 pb-2">
@@ -27,13 +35,16 @@
     onclick={() => {
       open = !open;
     }}
+    onnewchat={() => {
+      oncreateChat(worktree.id);
+    }}
   />
   {#if open}
     {#each worktree.chats as chat (chat.id)}
       <ChatRow
         {chat}
-        selected={chat.id === selectedId}
-        onclick={() => onselect(chat.id)}
+        selected={chat.id === selectedChatId}
+        onclick={() => onselectChat(chat.id)}
       />
     {/each}
   {/if}

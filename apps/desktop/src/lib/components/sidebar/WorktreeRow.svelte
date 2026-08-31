@@ -8,11 +8,13 @@
     project,
     expanded = true,
     onclick,
+    onnewchat,
   }: {
     worktree: Worktree;
     project: Project;
     expanded?: boolean;
     onclick?: () => void;
+    onnewchat?: () => void;
   } = $props();
 </script>
 
@@ -39,6 +41,9 @@
     type="button"
     class="flex size-[30px] shrink-0 cursor-default items-center justify-center text-muted hover:text-fg"
     aria-label="New chat"
+    onclick={() => {
+      onnewchat?.();
+    }}
   >
     <Icon name="plus" size={14} />
   </button>

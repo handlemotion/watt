@@ -7,10 +7,12 @@
     name,
     label,
     onclick,
+    iconSize = 14,
   }: {
     name: IconName;
     label: string;
     onclick?: () => void;
+    iconSize?: 14 | 16;
   } = $props();
 </script>
 
@@ -20,5 +22,5 @@
   class="flex size-6 shrink-0 cursor-default items-center justify-center rounded-md hover:bg-surface-hover"
   {onclick}
 >
-  <Icon {name} size={14} />
+  <Icon {name} size={iconSize} />
 </button>
