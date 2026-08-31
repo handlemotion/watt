@@ -171,7 +171,7 @@ export type WattRunResult = {
 
 export type WattRun = {
   cursorRunId: string;
-  stream: () => AsyncIterable<AgentEvent>;
+  stream: (options?: { signal?: AbortSignal }) => AsyncIterable<AgentEvent>;
   wait: () => Promise<WattRunResult>;
   cancel: () => Promise<void>;
 };

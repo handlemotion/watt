@@ -229,7 +229,8 @@ function fakeCodexAgent(): WattAgent & { creates: number } {
             agent.idempotencyKeys.push(options.idempotencyKey);
           }
           return {
-            cursorRunId: `codex-run-${String(creates)}`,
+            cursorRunId:
+              options?.idempotencyKey ?? `codex-run-${String(creates)}`,
             async *stream() {
               yield { type: "text_delta" as const, text: "codex" };
             },
@@ -250,13 +251,17 @@ type ControlledRun = Awaited<ReturnType<WattAgent["getRun"]>> & {
   finish: (result?: WattRunResult) => void;
 };
 
-function controlledAgent(): WattAgent & {
+function controlledAgent(
+  models:
+    ReturnType<typeof fakeModels> | typeof DEFAULT_CODEX_CATALOG = fakeModels(),
+): WattAgent & {
   starts: Array<{
     prompt: string;
     idempotencyKey: string | undefined;
     run: ControlledRun;
   }>;
   recovered: string[];
+  cancelled: string[];
 } {
   const starts: Array<{
     prompt: string;
@@ -264,6 +269,7 @@ function controlledAgent(): WattAgent & {
     run: ControlledRun;
   }> = [];
   const recovered: string[] = [];
+  const cancelled: string[] = [];
   const runs = new Map<string, ControlledRun>();
   let cursorRunNumber = 0;
   let cursorAgentNumber = 0;
@@ -281,12 +287,28 @@ function controlledAgent(): WattAgent & {
     const cursorRunId = `controlled-run-${++cursorRunNumber}`;
     const run: ControlledRun = {
       cursorRunId,
-      async *stream() {
+      async *stream(options) {
         yield { type: "text_delta" as const, text: prompt };
-        await result;
+        if (!options?.signal) {
+          await result;
+          return;
+        }
+        if (options.signal.aborted) return;
+        let removeAbortListener = () => {};
+        await Promise.race([
+          result,
+          new Promise<void>((done) => {
+            const onAbort = () => done();
+            options.signal?.addEventListener("abort", onAbort, { once: true });
+            removeAbortListener = () =>
+              options.signal?.removeEventListener("abort", onAbort);
+          }),
+        ]);
+        removeAbortListener();
       },
       wait: () => result,
       async cancel() {
+        cancelled.push(cursorRunId);
         resolve({ status: "cancelled" });
       },
       finish(value = { status: "finished", result: `${prompt}-done` }) {
@@ -315,8 +337,9 @@ function controlledAgent(): WattAgent & {
   return {
     starts,
     recovered,
+    cancelled,
     async listModels() {
-      return fakeModels();
+      return models;
     },
     async create() {
       return handle(`controlled-agent-${++cursorAgentNumber}`);
@@ -1221,6 +1244,63 @@ describe("createHost", () => {
     await reopened.close();
   });
 
+  it.each([
+    { runtime: "cursor-local" as const, name: "Cursor" },
+    { runtime: "codex-local" as const, name: "Codex" },
+  ])(
+    "suspends and recovers an active $name run without cancelling it",
+    async ({ runtime }) => {
+      const root = await mkdtemp(
+        path.join(tmpdir(), `watt-host-suspend-${runtime}-`),
+      );
+      const repo = path.join(root, "repo");
+      await mkdir(repo);
+      const stateDir = path.join(root, "state");
+      const worktreeRoot = path.join(root, "trees");
+      const git = fakeGit();
+      const cursor = controlledAgent();
+      const codex = controlledAgent(DEFAULT_CODEX_CATALOG);
+      const activeAgent = runtime === "codex-local" ? codex : cursor;
+      const options = {
+        stateDir,
+        worktreeRoot,
+        git,
+        agent: cursor,
+        codexAgent: codex,
+      };
+      const host = await createHost(options);
+      const project = await host.projects.register(repo);
+      const workspace = await host.workspaces.create({
+        projectId: project.id,
+        slug: `suspend-${runtime}`,
+      });
+      const created = await host.sessions.create({
+        workspaceId: workspace.id,
+        prompt: `continue-${runtime}`,
+        runtime,
+      });
+      await vi.waitFor(() => expect(activeAgent.starts).toHaveLength(1));
+
+      const suspended = host.suspend();
+      expect(host.suspend()).toBe(suspended);
+      await suspended;
+      expect(activeAgent.cancelled).toEqual([]);
+      expect(() => host.runs.get(created.run.id)).toThrow(
+        expect.objectContaining({ code: "host_closed" }),
+      );
+
+      const reopened = await createHost(options);
+      await vi.waitFor(() => expect(activeAgent.recovered).toHaveLength(1));
+      expect(reopened.runs.get(created.run.id)?.status).toBe("running");
+      activeAgent.starts[0]?.run.finish();
+      await expect(
+        reopened.runs.wait({ runId: created.run.id }),
+      ).resolves.toMatchObject({ status: "finished" });
+      expect(activeAgent.cancelled).toEqual([]);
+      await reopened.close();
+    },
+  );
+
   it("recovers both mapped Cursor runs and the idempotent dispatch crash window", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "watt-host-recover-"));
     const repo = path.join(root, "repo");
@@ -1883,6 +1963,18 @@ describe("createHost", () => {
       status: "finished",
       result: "codex-result",
     });
+    const followUp = await host.sessions.send({
+      sessionId: created.session.id,
+      prompt: "continue",
+    });
+    expect(await host.runs.wait({ runId: followUp.run.id })).toEqual({
+      runId: followUp.run.id,
+      status: "finished",
+      result: "codex-result",
+      durationMs: 5,
+    });
+    expect(createSpy).toHaveBeenCalledOnce();
+    expect(cursorCreate).not.toHaveBeenCalled();
     await host.close();
     await rm(root, { recursive: true, force: true });
   });

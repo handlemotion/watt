@@ -32,9 +32,40 @@ function copyModel(model: ModelSelection): ModelSelection {
 function wrapRun(run: CursorRun): WattRun {
   return {
     cursorRunId: run.cursorRunId,
-    async *stream() {
+    async *stream(options) {
+      const signal = options?.signal;
+      const iterator = run.stream()[Symbol.asyncIterator]();
+      let aborted = signal?.aborted ?? false;
       try {
-        for await (const message of run.stream()) {
+        while (!aborted) {
+          if (signal?.aborted) {
+            aborted = true;
+            void iterator.return?.().catch(() => undefined);
+            return;
+          }
+          const next = iterator.next();
+          let removeAbortListener: () => void = () => {};
+          const abort = new Promise<"aborted">((resolve) => {
+            if (!signal) return;
+            if (signal.aborted) {
+              resolve("aborted");
+              return;
+            }
+            const onAbort = () => resolve("aborted");
+            signal.addEventListener("abort", onAbort, { once: true });
+            removeAbortListener = () =>
+              signal.removeEventListener("abort", onAbort);
+          });
+          const item = await Promise.race([next, abort]).finally(
+            removeAbortListener,
+          );
+          if (item === "aborted") {
+            aborted = true;
+            void iterator.return?.().catch(() => undefined);
+            return;
+          }
+          if (item.done) return;
+          const message = item.value;
           const alreadyMapped = asAgentEvent(message);
           if (alreadyMapped) {
             yield alreadyMapped;
@@ -45,14 +76,17 @@ function wrapRun(run: CursorRun): WattRun {
           }
         }
       } catch (error) {
+        if (signal?.aborted) return;
         const message =
           error instanceof Error ? error.message : "agent stream failed";
         yield assertAgentEvent({ type: "error", message });
       } finally {
-        try {
-          await run.wait();
-        } catch {
-          // wait is required to release run watchers; stream already surfaced errors
+        if (!aborted && !signal?.aborted) {
+          try {
+            await run.wait();
+          } catch {
+            // wait is required to release run watchers; stream already surfaced errors
+          }
         }
       }
     },

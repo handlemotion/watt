@@ -96,6 +96,10 @@ export type HostMethodMap = {
     params: Record<string, never>;
     result: { closed: true };
   };
+  "host.suspend": {
+    params: Record<string, never>;
+    result: { suspended: true };
+  };
 };
 
 export type HostMethod = keyof HostMethodMap;

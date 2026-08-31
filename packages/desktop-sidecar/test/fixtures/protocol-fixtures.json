@@ -40,6 +40,18 @@
     }
   },
   {
+    "name": "host-suspend",
+    "direction": "client",
+    "valid": true,
+    "value": {
+      "type": "request",
+      "version": 1,
+      "requestId": "01J00000000000000000000020",
+      "method": "host.suspend",
+      "params": {}
+    }
+  },
+  {
     "name": "result",
     "direction": "server",
     "valid": true,

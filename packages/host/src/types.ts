@@ -220,6 +220,7 @@ export type CreateHostOptions = {
 export type Host = {
   capabilities: () => Promise<HostCapabilities>;
   close: () => Promise<void>;
+  suspend: () => Promise<void>;
   projects: {
     register: (repoRoot: string) => Promise<Project>;
     get: (id: string) => Project | undefined;

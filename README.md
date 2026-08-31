@@ -1,6 +1,28 @@
 # Watt
 
-Cursor-native worktree host. See [SPEC.md](./SPEC.md).
+Cursor-native worktree host for local Cursor and Codex sessions. See [SPEC.md](./SPEC.md).
+
+## CLI dogfood
+
+Build the workspace, create a worktree, and start a local session:
+
+```sh
+pnpm build
+node packages/cli/dist/cli.js --repo /path/to/repo worktree create --slug first-run
+node packages/cli/dist/cli.js agent send --workspace <workspace-id> --runtime cursor -p "Inspect this repository" --detach
+node packages/cli/dist/cli.js run attach --run <run-id>
+```
+
+Use `--runtime chatgpt` for Codex; it uses the existing `codex login` authentication. Codex sends remain attached because the current SDK cannot recover an in-flight run after the CLI exits. Follow-ups retain the session's runtime:
+
+```sh
+node packages/cli/dist/cli.js agent send --session <session-id> -p "Continue with the next fix"
+node packages/cli/dist/cli.js agent ls --workspace <workspace-id>
+node packages/cli/dist/cli.js run ls --session <session-id>
+node packages/cli/dist/cli.js run cancel --run <run-id>
+```
+
+Run `node packages/cli/dist/cli.js --help` for capabilities, reconciliation, and operation-diagnostic commands. Cursor sends support `--detach`; normal CLI exit suspends the Host without cancelling their active work. Desktop shutdown and explicit `run cancel` retain cancellation semantics.
 
 ## macOS distribution
 
@@ -25,6 +47,6 @@ pnpm desktop:sidecar
 pnpm desktop:sidecar:smoke
 ```
 
-After `pnpm install`, start the Tauri app with `pnpm desktop`. It builds the sidecar on first run if needed. Future views should use the existing typed Rust bridge rather than introducing another transport.
+Dependency installation requires `CENTRAL_LICENSE_KEY` for the licensed Svelte icon package. After install, start the Tauri app with `pnpm desktop`. It builds the sidecar on first run if needed. The current Svelte shell is static; future Host-connected views must use the existing typed Rust bridge rather than introducing another transport.
 
 `pnpm desktop:build` produces an ad-hoc-signed Tauri app and DMG on an Apple Silicon Mac, including real packaged Host lifecycle probes. Developer ID signing and notarization happen only in the protected GitHub `release` environment, and only after a Version Packages PR merges. Add a changeset with `pnpm changeset` in any PR that should ship.

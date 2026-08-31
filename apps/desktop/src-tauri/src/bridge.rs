@@ -374,6 +374,11 @@ impl SidecarHostClient {
         let _: Value = self.request("host.close", &json!({})).await?;
         Ok(())
     }
+
+    pub async fn suspend(&self) -> Result<(), BridgeError> {
+        let _: Value = self.request("host.suspend", &json!({})).await?;
+        Ok(())
+    }
 }
 
 impl RunSubscription {

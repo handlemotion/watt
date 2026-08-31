@@ -381,6 +381,73 @@ describe("createAgent", () => {
     expect(recovered.cursorRunId).toBe("run-existing");
     expect(runtime.recovered).toEqual(["run-existing"]);
   });
+
+  it("detaches an aborted stream without waiting for or cancelling the run", async () => {
+    const wait = vi.fn(async () => ({ status: "finished" as const }));
+    const cancel = vi.fn(async () => undefined);
+    const providerRun = {
+      cursorRunId: "durable-run",
+      async *stream() {
+        yield { type: "text_delta" as const, text: "started" };
+        await new Promise<void>(() => {});
+      },
+      wait,
+      cancel,
+    };
+    const runtime: CursorRuntime = {
+      async listModels() {
+        return [];
+      },
+      async create() {
+        return {
+          agentId: "durable-session",
+          async send() {
+            return providerRun;
+          },
+        };
+      },
+      async resume() {
+        throw new Error("unused");
+      },
+      async getRun() {
+        return providerRun;
+      },
+    };
+    const session = await createAgent({ runtime }).create({
+      cwd: "/tmp/wt",
+      workspace,
+      model,
+    });
+    const run = await session.send("go");
+    const controller = new AbortController();
+    const iterator = run
+      .stream({ signal: controller.signal })
+      [Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { type: "text_delta", text: "started" },
+    });
+    const pending = iterator.next();
+    controller.abort();
+    await expect(pending).resolves.toEqual({ done: true, value: undefined });
+
+    const betweenReadsController = new AbortController();
+    const betweenReadsIterator = run
+      .stream({ signal: betweenReadsController.signal })
+      [Symbol.asyncIterator]();
+    await expect(betweenReadsIterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { type: "text_delta", text: "started" },
+    });
+    betweenReadsController.abort();
+    await expect(betweenReadsIterator.next()).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
+    expect(wait).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+  });
 });
 
 describe("createSdkRuntime", () => {

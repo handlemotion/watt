@@ -14,7 +14,8 @@
         "host.sessions.v1",
         "host.runs.v1",
         "run-stream.v1",
-        "graceful-shutdown.v1"
+        "graceful-shutdown.v1",
+        "graceful-suspend.v1"
       ]
     },
     "HostOptions": {
@@ -80,7 +81,8 @@
             "host.capabilities",
             "diagnostics.operations.get",
             "diagnostics.operations.list",
-            "host.close"
+            "host.close",
+            "host.suspend"
           ]
         },
         "params": { "type": "object" }

@@ -123,6 +123,7 @@ export function assertMethodParams(method: HostMethod, params: unknown): void {
     case "projects.list":
     case "host.capabilities":
     case "host.close":
+    case "host.suspend":
       assertEmpty(params);
       return;
     case "projects.reconcile":
