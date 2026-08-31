@@ -254,6 +254,7 @@ type ControlledRun = Awaited<ReturnType<WattAgent["getRun"]>> & {
 function controlledAgent(
   models:
     ReturnType<typeof fakeModels> | typeof DEFAULT_CODEX_CATALOG = fakeModels(),
+  dispatchGate?: Promise<void>,
 ): WattAgent & {
   starts: Array<{
     prompt: string;
@@ -262,6 +263,7 @@ function controlledAgent(
   }>;
   recovered: string[];
   cancelled: string[];
+  dispatching: string[];
 } {
   const starts: Array<{
     prompt: string;
@@ -270,6 +272,7 @@ function controlledAgent(
   }> = [];
   const recovered: string[] = [];
   const cancelled: string[] = [];
+  const dispatching: string[] = [];
   const runs = new Map<string, ControlledRun>();
   let cursorRunNumber = 0;
   let cursorAgentNumber = 0;
@@ -323,6 +326,8 @@ function controlledAgent(
     return {
       cursorAgentId,
       async send(prompt: string, options?: { idempotencyKey?: string }) {
+        dispatching.push(prompt);
+        await dispatchGate;
         const run = makeRun(prompt);
         starts.push({
           prompt,
@@ -338,6 +343,7 @@ function controlledAgent(
     starts,
     recovered,
     cancelled,
+    dispatching,
     async listModels() {
       return models;
     },
@@ -1244,62 +1250,101 @@ describe("createHost", () => {
     await reopened.close();
   });
 
-  it.each([
-    { runtime: "cursor-local" as const, name: "Cursor" },
-    { runtime: "codex-local" as const, name: "Codex" },
-  ])(
-    "suspends and recovers an active $name run without cancelling it",
-    async ({ runtime }) => {
-      const root = await mkdtemp(
-        path.join(tmpdir(), `watt-host-suspend-${runtime}-`),
-      );
-      const repo = path.join(root, "repo");
-      await mkdir(repo);
-      const stateDir = path.join(root, "state");
-      const worktreeRoot = path.join(root, "trees");
-      const git = fakeGit();
-      const cursor = controlledAgent();
-      const codex = controlledAgent(DEFAULT_CODEX_CATALOG);
-      const activeAgent = runtime === "codex-local" ? codex : cursor;
-      const options = {
-        stateDir,
-        worktreeRoot,
-        git,
-        agent: cursor,
-        codexAgent: codex,
-      };
-      const host = await createHost(options);
-      const project = await host.projects.register(repo);
-      const workspace = await host.workspaces.create({
-        projectId: project.id,
-        slug: `suspend-${runtime}`,
-      });
-      const created = await host.sessions.create({
-        workspaceId: workspace.id,
-        prompt: `continue-${runtime}`,
-        runtime,
-      });
-      await vi.waitFor(() => expect(activeAgent.starts).toHaveLength(1));
+  it("suspends and recovers an active Cursor run without cancelling it", async () => {
+    const runtime = "cursor-local" as const;
+    const root = await mkdtemp(
+      path.join(tmpdir(), `watt-host-suspend-${runtime}-`),
+    );
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const stateDir = path.join(root, "state");
+    const worktreeRoot = path.join(root, "trees");
+    const git = fakeGit();
+    const cursor = controlledAgent();
+    const codex = controlledAgent(DEFAULT_CODEX_CATALOG);
+    const activeAgent = runtime === "codex-local" ? codex : cursor;
+    const options = {
+      stateDir,
+      worktreeRoot,
+      git,
+      agent: cursor,
+      codexAgent: codex,
+    };
+    const host = await createHost(options);
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: `suspend-${runtime}`,
+    });
+    const created = await host.sessions.create({
+      workspaceId: workspace.id,
+      prompt: `continue-${runtime}`,
+      runtime,
+    });
+    await vi.waitFor(() => expect(activeAgent.starts).toHaveLength(1));
 
-      const suspended = host.suspend();
-      expect(host.suspend()).toBe(suspended);
-      await suspended;
-      expect(activeAgent.cancelled).toEqual([]);
-      expect(() => host.runs.get(created.run.id)).toThrow(
-        expect.objectContaining({ code: "host_closed" }),
-      );
+    const suspended = host.suspend();
+    expect(host.suspend()).toBe(suspended);
+    await suspended;
+    expect(activeAgent.cancelled).toEqual([]);
+    expect(() => host.runs.get(created.run.id)).toThrow(
+      expect.objectContaining({ code: "host_closed" }),
+    );
 
-      const reopened = await createHost(options);
-      await vi.waitFor(() => expect(activeAgent.recovered).toHaveLength(1));
-      expect(reopened.runs.get(created.run.id)?.status).toBe("running");
-      activeAgent.starts[0]?.run.finish();
-      await expect(
-        reopened.runs.wait({ runId: created.run.id }),
-      ).resolves.toMatchObject({ status: "finished" });
-      expect(activeAgent.cancelled).toEqual([]);
-      await reopened.close();
-    },
-  );
+    const reopened = await createHost(options);
+    await vi.waitFor(() => expect(activeAgent.recovered).toHaveLength(1));
+    expect(reopened.runs.get(created.run.id)?.status).toBe("running");
+    activeAgent.starts[0]?.run.finish();
+    await expect(
+      reopened.runs.wait({ runId: created.run.id }),
+    ).resolves.toMatchObject({ status: "finished" });
+    expect(activeAgent.cancelled).toEqual([]);
+    await reopened.close();
+  });
+
+  it("cancels and settles an active Codex run before suspending", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-suspend-codex-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const stateDir = path.join(root, "state");
+    const worktreeRoot = path.join(root, "trees");
+    const git = fakeGit();
+    const cursor = controlledAgent();
+    let releaseDispatch!: () => void;
+    const dispatchGate = new Promise<void>((resolve) => {
+      releaseDispatch = resolve;
+    });
+    const codex = controlledAgent(DEFAULT_CODEX_CATALOG, dispatchGate);
+    const options = {
+      stateDir,
+      worktreeRoot,
+      git,
+      agent: cursor,
+      codexAgent: codex,
+    };
+    const host = await createHost(options);
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "suspend-codex",
+    });
+    const created = await host.sessions.create({
+      workspaceId: workspace.id,
+      prompt: "cancel-codex",
+      runtime: "codex-local",
+    });
+    await vi.waitFor(() => expect(codex.dispatching).toHaveLength(1));
+
+    const suspended = host.suspend();
+    releaseDispatch();
+    await suspended;
+    expect(codex.cancelled).toEqual([codex.starts[0]?.run.cursorRunId]);
+
+    const reopened = await createHost(options);
+    expect(reopened.runs.get(created.run.id)?.status).toBe("cancelled");
+    expect(codex.recovered).toEqual([]);
+    await reopened.close();
+  });
 
   it("recovers both mapped Cursor runs and the idempotent dispatch crash window", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "watt-host-recover-"));

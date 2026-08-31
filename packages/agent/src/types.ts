@@ -120,6 +120,7 @@ export type SdkStreamMessage =
 export type CursorRun = {
   cursorRunId: string;
   stream: () => AsyncIterable<unknown>;
+  detach?: () => Promise<void>;
   wait: () => Promise<WattRunResult>;
   cancel: () => Promise<void>;
 };

@@ -36,11 +36,18 @@ function wrapRun(run: CursorRun): WattRun {
       const signal = options?.signal;
       const iterator = run.stream()[Symbol.asyncIterator]();
       let aborted = signal?.aborted ?? false;
+      const detach = async () => {
+        if (run.detach) {
+          await run.detach();
+          return;
+        }
+        void iterator.return?.().catch(() => undefined);
+      };
       try {
         while (!aborted) {
           if (signal?.aborted) {
             aborted = true;
-            void iterator.return?.().catch(() => undefined);
+            await detach();
             return;
           }
           const next = iterator.next();
@@ -61,7 +68,7 @@ function wrapRun(run: CursorRun): WattRun {
           );
           if (item === "aborted") {
             aborted = true;
-            void iterator.return?.().catch(() => undefined);
+            await detach();
             return;
           }
           if (item.done) return;

@@ -15,6 +15,7 @@ const sdk = vi.hoisted(() => ({
   loads: 0,
   creates: 0,
   gets: 0,
+  closes: 0,
   createOptions: [] as unknown[],
   resumeOptions: [] as unknown[],
   sendOptions: [] as unknown[],
@@ -29,10 +30,14 @@ vi.mock("@cursor/sdk", () => {
         sdk.createOptions.push(options);
         return {
           agentId: `runtime-${sdk.creates}`,
+          async [Symbol.asyncDispose]() {
+            sdk.closes += 1;
+          },
           async send(_prompt: string, options: unknown) {
             sdk.sendOptions.push(options);
             return {
               id: `sdk-run-${sdk.creates}`,
+              agentId: `runtime-${sdk.creates}`,
               async *stream() {},
               wait: async () => ({
                 status: "finished",
@@ -48,10 +53,14 @@ vi.mock("@cursor/sdk", () => {
         sdk.resumeOptions.push(options);
         return {
           agentId: "runtime-resumed",
+          async [Symbol.asyncDispose]() {
+            sdk.closes += 1;
+          },
           async send(_prompt: string, options: unknown) {
             sdk.sendOptions.push(options);
             return {
               id: "sdk-run-resumed",
+              agentId: "runtime-resumed",
               async *stream() {},
               wait: async () => ({ status: "finished" }),
               cancel: async () => undefined,
@@ -63,6 +72,7 @@ vi.mock("@cursor/sdk", () => {
         sdk.gets += 1;
         return {
           id: runId,
+          agentId: "runtime-recovered",
           async *stream() {},
           wait: async () => ({ status: "finished", result: "recovered" }),
           cancel: async () => undefined,
@@ -385,6 +395,7 @@ describe("createAgent", () => {
   it("detaches an aborted stream without waiting for or cancelling the run", async () => {
     const wait = vi.fn(async () => ({ status: "finished" as const }));
     const cancel = vi.fn(async () => undefined);
+    const detach = vi.fn(async () => undefined);
     const providerRun = {
       cursorRunId: "durable-run",
       async *stream() {
@@ -393,6 +404,7 @@ describe("createAgent", () => {
       },
       wait,
       cancel,
+      detach,
     };
     const runtime: CursorRuntime = {
       async listModels() {
@@ -447,6 +459,7 @@ describe("createAgent", () => {
     });
     expect(wait).not.toHaveBeenCalled();
     expect(cancel).not.toHaveBeenCalled();
+    expect(detach).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -521,8 +534,10 @@ describe("createSdkRuntime", () => {
         enableAgentRetries: true,
       },
     });
-    await resumed.send("resumed follow-up");
+    const resumedRun = await resumed.send("resumed follow-up");
     expect(sdk.sendOptions.at(-1)).toMatchObject({ model, mode: "plan" });
+    await resumedRun.detach?.();
+    expect(sdk.closes).toBe(1);
 
     const run = await runtime.getRun({
       cursorRunId: "sdk-existing",
@@ -534,6 +549,8 @@ describe("createSdkRuntime", () => {
       result: "recovered",
     });
     expect(sdk.gets).toBe(1);
+    await run.detach?.();
+    expect(sdk.closes).toBe(2);
   });
 
   it("preserves custom-tool schemas, context, structured results, and follow-up options", async () => {

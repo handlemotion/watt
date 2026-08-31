@@ -177,6 +177,7 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
   const activeRuns = new Map<string, WattRun>();
   const activeRunControllers = new Map<string, AbortController>();
   const cancelRequested = new Set<string>();
+  const suspendCancelledRuns = new Set<string>();
   const runVersions = new Map<string, number>();
   const runWaiters = new Map<string, Set<() => void>>();
   const catalogValidatedRuns = new Set<string>();
@@ -454,6 +455,21 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
     return value as HostEvent;
   }
 
+  async function suspendRun(
+    stored: StoredRun,
+    run: WattRun,
+    controller: AbortController,
+  ): Promise<void> {
+    const session = requireSession(stored.value.sessionId);
+    if (session.runtime === "codex-local") {
+      cancelRequested.add(stored.value.id);
+      suspendCancelledRuns.add(stored.value.id);
+      await run.cancel().catch(() => undefined);
+      return;
+    }
+    controller.abort();
+  }
+
   async function consumeRun(
     stored: StoredRun,
     run: WattRun,
@@ -464,7 +480,7 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
     const controller = new AbortController();
     activeRunControllers.set(stored.value.id, controller);
     if (suspending) {
-      controller.abort();
+      await suspendRun(stored, run, controller);
     } else if (cancelRequested.has(stored.value.id) || closing) {
       await run.cancel().catch(() => undefined);
     }
@@ -488,7 +504,7 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
         );
         notifyRun(stored.value.id);
       }
-      if (!suspending) {
+      if (!suspending || suspendCancelledRuns.has(stored.value.id)) {
         finishRun(
           stored.value.id,
           hostResult(stored.value.id, await run.wait()),
@@ -505,6 +521,7 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
       activeRuns.delete(stored.value.id);
       activeRunControllers.delete(stored.value.id);
       cancelRequested.delete(stored.value.id);
+      suspendCancelledRuns.delete(stored.value.id);
     }
   }
 
@@ -978,9 +995,14 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
     shutdownPromise = (async () => {
       try {
         if (suspending) {
-          for (const controller of activeRunControllers.values()) {
-            controller.abort();
+          const cancellations: Promise<void>[] = [];
+          for (const [runId, run] of activeRuns) {
+            const stored = state.getRun(runId);
+            const controller = activeRunControllers.get(runId);
+            if (!stored || !controller) continue;
+            cancellations.push(suspendRun(stored, run, controller));
           }
+          await Promise.all(cancellations);
         } else {
           for (const stored of state.listNonterminalRuns()) {
             if (stored.internalStatus !== "queued") {
