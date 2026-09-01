@@ -7,22 +7,24 @@
   let {
     worktrees,
     projects,
+    selectedWorkspaceId,
     selectedChatId,
+    onselectWorkspace,
     onselectChat,
     oncreateChat,
   }: {
     worktrees: Worktree[];
     projects: readonly Project[];
+    selectedWorkspaceId: string | null;
     selectedChatId: string | null;
-    onselectChat: (id: string) => void;
-    oncreateChat: (worktreeId: string) => void;
+    onselectWorkspace: (id: string) => void;
+    onselectChat: (workspaceId: string, chatId: string) => void;
+    oncreateChat: (workspaceId: string) => void;
   } = $props();
 
   const projectById = $derived.by(() => {
     const map: Record<string, Project> = {};
-    for (const project of projects) {
-      map[project.id] = project;
-    }
+    for (const project of projects) map[project.id] = project;
     return map;
   });
 
@@ -41,7 +43,9 @@
       <WorktreeGroup
         worktree={group.worktree}
         project={group.project}
+        {selectedWorkspaceId}
         {selectedChatId}
+        {onselectWorkspace}
         {onselectChat}
         {oncreateChat}
       />

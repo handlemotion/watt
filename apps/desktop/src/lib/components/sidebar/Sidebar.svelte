@@ -10,16 +10,20 @@
     projects,
     worktrees,
     currentProject,
+    selectedWorkspaceId,
     selectedChatId,
+    onselectWorkspace,
     onselectChat,
     oncreateChat,
   }: {
     projects: readonly Project[];
     worktrees: Worktree[];
     currentProject: Project;
+    selectedWorkspaceId: string | null;
     selectedChatId: string | null;
-    onselectChat: (id: string) => void;
-    oncreateChat: (worktreeId: string) => void;
+    onselectWorkspace: (id: string) => void;
+    onselectChat: (workspaceId: string, chatId: string) => void;
+    oncreateChat: (workspaceId: string) => void;
   } = $props();
 </script>
 
@@ -33,9 +37,11 @@
       <WorktreeList
         {worktrees}
         {projects}
-        selectedChatId={selectedChatId}
-        onselectChat={onselectChat}
-        oncreateChat={oncreateChat}
+        {selectedWorkspaceId}
+        {selectedChatId}
+        {onselectWorkspace}
+        {onselectChat}
+        {oncreateChat}
       />
     </div>
   </div>

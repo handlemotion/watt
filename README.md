@@ -1,6 +1,6 @@
 # Watt
 
-Cursor-native worktree host for local Cursor and Codex sessions. See [SPEC.md](./SPEC.md).
+Cursor-native worktree host for local Cursor and Codex sessions, with libraries, a CLI, and a native Svelte 5 + Tauri 2 desktop app. See [SPEC.md](./SPEC.md).
 
 ## CLI dogfood
 
@@ -33,7 +33,7 @@ shasum -a 256 -c Watt-vX.Y.Z-aarch64.dmg.sha256
 gh attestation verify Watt-vX.Y.Z-aarch64.dmg --repo handlemotion/watt
 ```
 
-Drag Watt into Applications and launch it normally. The current desktop app is intentionally a lifecycle shell: it proves that the local Host starts and shuts down safely, but does not yet provide workspace product UI or automatic updates.
+Drag Watt into Applications and launch it normally. The desktop app reads projects, worktrees, and sessions from the local Host and includes one native PTY-backed terminal per active worktree. Press <kbd>⌘J</kbd> to show or hide the terminal sidebar.
 
 ## Development
 
@@ -47,6 +47,6 @@ pnpm desktop:sidecar
 pnpm desktop:sidecar:smoke
 ```
 
-Dependency installation requires `CENTRAL_LICENSE_KEY` for the licensed Svelte icon package. After install, start the Tauri app with `pnpm desktop`. It builds the sidecar on first run if needed. The current Svelte shell is static; future Host-connected views must use the existing typed Rust bridge rather than introducing another transport.
+Dependency installation requires `CENTRAL_LICENSE_KEY` for the licensed Svelte icon package. After install, start the Tauri app with `pnpm desktop`. It builds the sidecar on first run if needed. Desktop views use the existing typed Rust bridge rather than introducing another transport; filesystem paths and executable selection remain native-only capabilities.
 
 `pnpm desktop:build` produces an ad-hoc-signed Tauri app and DMG on an Apple Silicon Mac, including real packaged Host lifecycle probes. Developer ID signing and notarization happen only in the protected GitHub `release` environment, and only after a Version Packages PR merges. Add a changeset with `pnpm changeset` in any PR that should ship.

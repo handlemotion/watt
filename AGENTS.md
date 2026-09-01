@@ -1,8 +1,6 @@
 # Agents
 
-Watt is a Cursor-native worktree host. **[SPEC.md](./SPEC.md) is the contract.** Keep code in lockstep with it.
-
-v0's product surface is libraries + CLI only. The Svelte + Tauri shell is distribution infrastructure: it may package the local Host and start the sidecar, but it must not expose workspace controls or other product UI. Future UI talks only to `@watt/host` through the typed Rust sidecar bridge. Do not add HTTP, WebSocket, Electron, ACP, or cloud agents.
+Watt is a Cursor-native worktree host with libraries, a CLI, and a Svelte 5 + Tauri 2 desktop app. Desktop product UI and local terminal capability are supported. The frontend talks to `@watt/host` through the typed Rust sidecar bridge; keep filesystem and process authority in Rust. Do not add HTTP, WebSocket, Electron, ACP, or cloud agents.
 
 ## Desktop shell icons
 

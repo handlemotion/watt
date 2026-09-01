@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
 
 @theme {
   --color-app: #f8f8f8;
@@ -42,4 +43,9 @@ body,
 
 button {
   -webkit-app-region: no-drag;
+}
+
+.xterm,
+.xterm .xterm-viewport {
+  height: 100%;
 }

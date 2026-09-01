@@ -23,7 +23,7 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum DesktopStatus {
+pub(crate) enum DesktopStatus {
     Starting,
     Ready,
     Error,
@@ -40,7 +40,7 @@ impl DesktopStatus {
     }
 }
 
-struct DesktopRuntime {
+pub(crate) struct DesktopRuntime {
     status: Arc<RwLock<DesktopStatus>>,
     client: Arc<RwLock<Option<SidecarHostClient>>>,
     stop: Mutex<Option<oneshot::Sender<()>>>,
@@ -82,7 +82,7 @@ impl DesktopRuntime {
         })
     }
 
-    fn stop(&self) {
+    pub(crate) fn stop(&self) {
         if let Some(stop) = self.stop.lock().expect("stop lock poisoned").take() {
             let _ = stop.send(());
         }
@@ -91,10 +91,17 @@ impl DesktopRuntime {
         }
     }
 
-    fn client(&self) -> Option<SidecarHostClient> {
+    pub(crate) fn client(&self) -> Option<SidecarHostClient> {
         self.client
             .read()
             .expect("desktop client lock poisoned")
+            .clone()
+    }
+
+    pub(crate) fn status(&self) -> DesktopStatus {
+        self.status
+            .read()
+            .expect("desktop status lock poisoned")
             .clone()
     }
 }
@@ -265,8 +272,21 @@ pub fn run() {
         }
     };
     let quit_runtime = runtime.clone();
+    let terminals = Arc::new(crate::terminal::TerminalRegistry::new());
+    let quit_terminals = terminals.clone();
 
     tauri::Builder::default()
+        .manage(runtime.clone())
+        .manage(terminals)
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .invoke_handler(tauri::generate_handler![
+            crate::desktop_api::desktop_snapshot,
+            crate::terminal::terminal_open,
+            crate::terminal::terminal_write,
+            crate::terminal::terminal_resize,
+            crate::terminal::terminal_restart,
+            crate::terminal::terminal_kill,
+        ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             crate::macos::install_traffic_lights(app);
@@ -283,6 +303,7 @@ pub fn run() {
         .expect("failed to build Watt")
         .run(move |_app, event| {
             if let tauri::RunEvent::Exit = event {
+                quit_terminals.shutdown_all();
                 quit_runtime.stop();
                 if window_smoke {
                     println!("desktop window startup and graceful shutdown passed.");
