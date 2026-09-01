@@ -40,6 +40,21 @@ importers:
 
   apps/desktop:
     dependencies:
+      "@tauri-apps/api":
+        specifier: 2.11.1
+        version: 2.11.1
+      "@tauri-apps/plugin-clipboard-manager":
+        specifier: 2.3.3
+        version: 2.3.3
+      "@xterm/addon-fit":
+        specifier: 0.11.0
+        version: 0.11.0
+      "@xterm/addon-unicode11":
+        specifier: 0.9.0
+        version: 0.9.0
+      "@xterm/xterm":
+        specifier: 6.0.0
+        version: 6.0.0
       central-icons:
         specifier: npm:@central-icons-svelte/round-outlined-radius-2-stroke-1.5@1.1.315
         version: "@central-icons-svelte/round-outlined-radius-2-stroke-1.5@1.1.315(svelte@5.57.0)"
@@ -68,6 +83,9 @@ importers:
       vite:
         specifier: 8.2.2
         version: 8.2.2(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0)
+      vitest:
+        specifier: 3.2.4
+        version: 3.2.4(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.0)
 
   packages/agent:
     dependencies:
@@ -1424,6 +1442,12 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
+  "@tauri-apps/api@2.11.1":
+    resolution:
+      {
+        integrity: sha512-M2FPuYND2m+wh5hfW9ZpSdxMPdEJovPBWwoHJmwUpysTYNHaOkVFN419m/K0LIgjb/7KU2vBgsUepJWugQCvAA==,
+      }
+
   "@tauri-apps/cli-darwin-arm64@2.11.4":
     resolution:
       {
@@ -1535,6 +1559,12 @@ packages:
       }
     engines: { node: ">= 10" }
     hasBin: true
+
+  "@tauri-apps/plugin-clipboard-manager@2.3.3":
+    resolution:
+      {
+        integrity: sha512-KnyoTs9gj1yEgDkSPUNjOIOHjJTr5wk8IWcYMOWxYTIJCip6QwlyPW8u2X+6bd6kHM4fAdZNpxoal0gy/TwJbg==,
+      }
 
   "@turbo/darwin-64@2.10.12":
     resolution:
@@ -1668,6 +1698,24 @@ packages:
     resolution:
       {
         integrity: sha512-fB2V0JFrQSMsCo9HiSq3Ezpdv4iYaXRG1Sx8edX3MwxfyNn83mKiGzOcH+Fkxt4MHxr3y42fQi1oeAInqgX2QA==,
+      }
+
+  "@xterm/addon-fit@0.11.0":
+    resolution:
+      {
+        integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==,
+      }
+
+  "@xterm/addon-unicode11@0.9.0":
+    resolution:
+      {
+        integrity: sha512-FxDnYcyuXhNl+XSqGZL/t0U9eiNb/q3EWT5rYkQT/zuig8Gz/VagnQANKHdDWFM2lTMk9ly0EFQxxxtZUoRetw==,
+      }
+
+  "@xterm/xterm@6.0.0":
+    resolution:
+      {
+        integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==,
       }
 
   "@yao-pkg/pkg-fetch@3.6.5":
@@ -4074,6 +4122,8 @@ snapshots:
       tailwindcss: 4.3.3
       vite: 8.2.2(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0)
 
+  "@tauri-apps/api@2.11.1": {}
+
   "@tauri-apps/cli-darwin-arm64@2.11.4":
     optional: true
 
@@ -4120,6 +4170,10 @@ snapshots:
       "@tauri-apps/cli-win32-arm64-msvc": 2.11.4
       "@tauri-apps/cli-win32-ia32-msvc": 2.11.4
       "@tauri-apps/cli-win32-x64-msvc": 2.11.4
+
+  "@tauri-apps/plugin-clipboard-manager@2.3.3":
+    dependencies:
+      "@tauri-apps/api": 2.11.1
 
   "@turbo/darwin-64@2.10.12":
     optional: true
@@ -4201,6 +4255,12 @@ snapshots:
       "@vitest/pretty-format": 3.2.4
       loupe: 3.2.1
       tinyrainbow: 2.0.0
+
+  "@xterm/addon-fit@0.11.0": {}
+
+  "@xterm/addon-unicode11@0.9.0": {}
+
+  "@xterm/xterm@6.0.0": {}
 
   "@yao-pkg/pkg-fetch@3.6.5":
     dependencies:

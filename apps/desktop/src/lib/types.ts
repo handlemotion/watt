@@ -26,3 +26,37 @@ export type Worktree = {
   pullRequest?: string;
   chats: Chat[];
 };
+
+export type HostStatus = "starting" | "ready" | "error";
+
+export type DesktopSession = {
+  id: string;
+  workspaceId: string;
+  runtime: string;
+  mode: string;
+  createdAt: number;
+};
+
+export type DesktopWorkspace = {
+  id: string;
+  projectId: string;
+  worktreePath: string;
+  branch: string;
+  slug: string;
+  baseRef: string;
+  createdAt: number;
+  archivedAt: number | null;
+  sessions: DesktopSession[];
+};
+
+export type DesktopProject = {
+  id: string;
+  name: string;
+  repoRoot: string;
+  workspaces: DesktopWorkspace[];
+};
+
+export type DesktopSnapshot = {
+  host: { status: HostStatus; message: string };
+  projects: DesktopProject[];
+};
