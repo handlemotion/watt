@@ -1,0 +1,38 @@
+name: Cloud provider smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  staging:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment: staging
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Exercise Upstash staging
+        env:
+          WATT_CLOUD_API_URL: ${{ vars.WATT_CLOUD_API_URL }}
+          WATT_CLOUD_ACCESS_TOKEN: ${{ secrets.WATT_CLOUD_ACCESS_TOKEN }}
+          WATT_GITHUB_REPOSITORY_ID: ${{ vars.WATT_GITHUB_REPOSITORY_ID }}
+          WATT_GITHUB_INSTALLATION_ID: ${{ vars.WATT_GITHUB_INSTALLATION_ID }}
+          WATT_SMOKE_BASE_REF: ${{ vars.WATT_SMOKE_BASE_REF }}
+          WATT_SMOKE_BASE_SHA: ${{ vars.WATT_SMOKE_BASE_SHA }}
+        run: pnpm --filter @watt/cloud-api smoke:provider

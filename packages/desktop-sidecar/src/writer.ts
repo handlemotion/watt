@@ -1,10 +1,7 @@
 import { once } from "node:events";
 import type { Writable } from "node:stream";
 
-import {
-  MAX_OUTBOUND_QUEUE_BYTES,
-  MAX_OUTBOUND_QUEUE_MESSAGES,
-} from "./constants.js";
+import { MAX_OUTBOUND_QUEUE_BYTES, MAX_OUTBOUND_QUEUE_MESSAGES } from "./constants.js";
 import { encodeFrame } from "./codec.js";
 import { ProtocolError } from "./types.js";
 

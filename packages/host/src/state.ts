@@ -42,8 +42,7 @@ type RunRow = {
   id: string;
   session_id: string;
   cursor_run_id: string | null;
-  status:
-    "queued" | "dispatching" | "running" | "finished" | "error" | "cancelled";
+  status: "queued" | "dispatching" | "running" | "finished" | "error" | "cancelled";
   prompt: string | null;
   created_at: number;
   started_at: number | null;
@@ -55,6 +54,7 @@ type RunRow = {
 };
 type RunEventRow = { sequence: number; event_json: string };
 type CapabilityCacheRow = { payload_json: string; fetched_at: number };
+type MutationReplayRow = { input_json: string; result_json: string };
 type OperationRow = {
   schema_version: 1;
   id: string;
@@ -132,11 +132,7 @@ function storedRun(row: RunRow): StoredRun {
     finishedAt: row.finished_at,
   };
   let result: RunResult | null = null;
-  if (
-    row.status === "finished" ||
-    row.status === "error" ||
-    row.status === "cancelled"
-  ) {
+  if (row.status === "finished" || row.status === "error" || row.status === "cancelled") {
     result = { runId: row.id, status: row.status };
     if (row.result_text !== null) result.result = row.result_text;
     if (row.error_message !== null) {
@@ -201,9 +197,7 @@ const OPERATION_COLUMNS =
 /** The one SQLite-specific persistence boundary used by the host workflow. */
 export function createState(database: SqliteDatabase) {
   const statements = {
-    projectById: database.prepare(
-      "SELECT id, repo_root, created_at FROM projects WHERE id = ?",
-    ),
+    projectById: database.prepare("SELECT id, repo_root, created_at FROM projects WHERE id = ?"),
     projectByRoot: database.prepare(
       "SELECT id, repo_root, created_at FROM projects WHERE repo_root = ?",
     ),
@@ -231,9 +225,7 @@ export function createState(database: SqliteDatabase) {
     insertWorkspace: database.prepare(
       "INSERT INTO workspaces (id, project_id, worktree_path, branch, slug, base_ref, created_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
     ),
-    archiveWorkspace: database.prepare(
-      "UPDATE workspaces SET archived_at = ? WHERE id = ?",
-    ),
+    archiveWorkspace: database.prepare("UPDATE workspaces SET archived_at = ? WHERE id = ?"),
     sessionById: database.prepare(
       "SELECT id, workspace_id, runtime, cursor_agent_id, mode, model, model_params_json, execution_policy_json, created_at FROM sessions WHERE id = ?",
     ),
@@ -287,9 +279,13 @@ export function createState(database: SqliteDatabase) {
     upsertCapabilityCache: database.prepare(
       "INSERT INTO capability_cache (key, payload_json, fetched_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at",
     ),
-    operationById: database.prepare(
-      `SELECT ${OPERATION_COLUMNS} FROM operations WHERE id = ?`,
+    mutationReplay: database.prepare(
+      "SELECT input_json, result_json FROM mutation_replays WHERE operation = ? AND idempotency_key = ?",
     ),
+    insertMutationReplay: database.prepare(
+      "INSERT INTO mutation_replays (operation, idempotency_key, input_json, result_json, created_at) VALUES (?, ?, ?, ?, ?)",
+    ),
+    operationById: database.prepare(`SELECT ${OPERATION_COLUMNS} FROM operations WHERE id = ?`),
     operations: database.prepare(
       `SELECT ${OPERATION_COLUMNS} FROM operations
        WHERE (? IS NULL OR project_id = ?)
@@ -341,12 +337,7 @@ export function createState(database: SqliteDatabase) {
         JSON.stringify(sessionValue.executionPolicy),
         sessionValue.createdAt,
       );
-      statements.insertRun.run(
-        runValue.id,
-        runValue.sessionId,
-        prompt,
-        runValue.createdAt,
-      );
+      statements.insertRun.run(runValue.id, runValue.sessionId, prompt, runValue.createdAt);
     },
   );
 
@@ -404,8 +395,7 @@ export function createState(database: SqliteDatabase) {
       return row && project(row);
     },
     getProjectByRoot(repoRoot: string): Project | undefined {
-      const row = statements.projectByRoot.get(repoRoot) as
-        ProjectRow | undefined;
+      const row = statements.projectByRoot.get(repoRoot) as ProjectRow | undefined;
       return row && project(row);
     },
     listProjects(): Project[] {
@@ -418,17 +408,12 @@ export function createState(database: SqliteDatabase) {
       const row = statements.workspaceById.get(id) as WorkspaceRow | undefined;
       return row && workspace(row);
     },
-    getActiveWorkspaceBySlug(
-      projectId: string,
-      slug: string,
-    ): Workspace | undefined {
-      const row = statements.activeWorkspaceBySlug.get(projectId, slug) as
-        WorkspaceRow | undefined;
+    getActiveWorkspaceBySlug(projectId: string, slug: string): Workspace | undefined {
+      const row = statements.activeWorkspaceBySlug.get(projectId, slug) as WorkspaceRow | undefined;
       return row && workspace(row);
     },
     getActiveWorkspaceByPath(worktreePath: string): Workspace | undefined {
-      const row = statements.activeWorkspaceByPath.get(worktreePath) as
-        WorkspaceRow | undefined;
+      const row = statements.activeWorkspaceByPath.get(worktreePath) as WorkspaceRow | undefined;
       return row && workspace(row);
     },
     listWorkspaces(projectId: string, includeArchived: boolean): Workspace[] {
@@ -458,9 +443,7 @@ export function createState(database: SqliteDatabase) {
       return row && session(row);
     },
     listSessions(workspaceId: string): Session[] {
-      return (
-        statements.sessionsForWorkspace.all(workspaceId) as SessionRow[]
-      ).map(session);
+      return (statements.sessionsForWorkspace.all(workspaceId) as SessionRow[]).map(session);
     },
     insertSession(value: Session): void {
       statements.insertSession.run(
@@ -478,11 +461,7 @@ export function createState(database: SqliteDatabase) {
     updateSessionCursorAgentId(id: string, cursorAgentId: string): void {
       statements.updateSessionCursorAgentId.run(cursorAgentId, id);
     },
-    insertSessionAndRun(
-      sessionValue: Session,
-      runValue: Run,
-      prompt: string,
-    ): void {
+    insertSessionAndRun(sessionValue: Session, runValue: Run, prompt: string): void {
       insertSessionAndRun(sessionValue, runValue, prompt);
     },
     getRun(id: string): StoredRun | undefined {
@@ -495,41 +474,27 @@ export function createState(database: SqliteDatabase) {
       );
     },
     insertRun(value: Run, prompt: string): void {
-      statements.insertRun.run(
-        value.id,
-        value.sessionId,
-        prompt,
-        value.createdAt,
-      );
+      statements.insertRun.run(value.id, value.sessionId, prompt, value.createdAt);
     },
     getNextQueuedRun(sessionId: string): StoredRun | undefined {
       const row = statements.nextQueuedRun.get(sessionId) as RunRow | undefined;
       return row && storedRun(row);
     },
     getActiveRun(sessionId: string): StoredRun | undefined {
-      const row = statements.activeRunForSession.get(sessionId) as
-        RunRow | undefined;
+      const row = statements.activeRunForSession.get(sessionId) as RunRow | undefined;
       return row && storedRun(row);
     },
     listNonterminalRuns(): StoredRun[] {
       return (statements.nonterminalRuns.all() as RunRow[]).map(storedRun);
     },
     listNonterminalRunsForWorkspace(workspaceId: string): StoredRun[] {
-      return (
-        statements.nonterminalRunsForWorkspace.all(workspaceId) as RunRow[]
-      ).map(storedRun);
+      return (statements.nonterminalRunsForWorkspace.all(workspaceId) as RunRow[]).map(storedRun);
     },
     markRunDispatching(id: string, startedAt: number): boolean {
       return statements.markRunDispatching.run(startedAt, id).changes === 1;
     },
-    markRunRunning(
-      id: string,
-      cursorRunId: string,
-      startedAt: number,
-    ): boolean {
-      return (
-        statements.markRunRunning.run(cursorRunId, startedAt, id).changes === 1
-      );
+    markRunRunning(id: string, cursorRunId: string, startedAt: number): boolean {
+      return statements.markRunRunning.run(cursorRunId, startedAt, id).changes === 1;
     },
     finishRun(id: string, result: RunResult, finishedAt: number): boolean {
       return (
@@ -547,12 +512,7 @@ export function createState(database: SqliteDatabase) {
     clearRunEvents(id: string): void {
       statements.clearRunEvents.run(id);
     },
-    insertRunEvent(
-      runId: string,
-      sequence: number,
-      eventJson: string,
-      createdAt: number,
-    ): void {
+    insertRunEvent(runId: string, sequence: number, eventJson: string, createdAt: number): void {
       statements.insertRunEvent.run(runId, sequence, eventJson, createdAt);
     },
     listRunEventsAfter(runId: string, sequence: number): RunEventRow[] {
@@ -561,21 +521,43 @@ export function createState(database: SqliteDatabase) {
     getCapabilityCache(
       key: "cursor_models" | "codex_models" = "cursor_models",
     ): { payloadJson: string; fetchedAt: number } | undefined {
-      const row = statements.capabilityCache.get(key) as
-        CapabilityCacheRow | undefined;
-      return (
-        row && { payloadJson: row.payload_json, fetchedAt: row.fetched_at }
-      );
+      const row = statements.capabilityCache.get(key) as CapabilityCacheRow | undefined;
+      return row && { payloadJson: row.payload_json, fetchedAt: row.fetched_at };
     },
     putCapabilityCache(
       models: unknown,
       fetchedAt: number,
       key: "cursor_models" | "codex_models" = "cursor_models",
     ): void {
-      statements.upsertCapabilityCache.run(
-        key,
-        JSON.stringify(models),
-        fetchedAt,
+      statements.upsertCapabilityCache.run(key, JSON.stringify(models), fetchedAt);
+    },
+    getMutationReplay(
+      operation: string,
+      idempotencyKey: string,
+    ): { input: unknown; result: unknown } | undefined {
+      const row = statements.mutationReplay.get(operation, idempotencyKey) as
+        | MutationReplayRow
+        | undefined;
+      return (
+        row && {
+          input: parseJson(row.input_json),
+          result: parseJson(row.result_json),
+        }
+      );
+    },
+    insertMutationReplay(
+      operation: string,
+      idempotencyKey: string,
+      input: unknown,
+      result: unknown,
+      createdAt: number,
+    ): void {
+      statements.insertMutationReplay.run(
+        operation,
+        idempotencyKey,
+        JSON.stringify(input),
+        JSON.stringify(result),
+        createdAt,
       );
     },
     getOperation(id: string): WorkspaceOperation | undefined {
@@ -600,9 +582,7 @@ export function createState(database: SqliteDatabase) {
       ).map(operation);
     },
     listRecoverableOperations(): WorkspaceOperation[] {
-      return (statements.recoverableOperations.all() as OperationRow[]).map(
-        operation,
-      );
+      return (statements.recoverableOperations.all() as OperationRow[]).map(operation);
     },
     insertOperation(value: WorkspaceOperation): void {
       statements.insertOperation.run(
@@ -622,11 +602,8 @@ export function createState(database: SqliteDatabase) {
       updatedAt: number,
     ): boolean {
       return (
-        statements.updateOperationInputs.run(
-          JSON.stringify(requestedInputs),
-          updatedAt,
-          id,
-        ).changes === 1
+        statements.updateOperationInputs.run(JSON.stringify(requestedInputs), updatedAt, id)
+          .changes === 1
       );
     },
     advanceOperation(
@@ -653,13 +630,7 @@ export function createState(database: SqliteDatabase) {
       nextPhase: WorkspaceOperationPhase,
       updatedAt: number,
     ): void {
-      insertWorkspaceAndAdvanceOperation(
-        value,
-        operationId,
-        expectedPhase,
-        nextPhase,
-        updatedAt,
-      );
+      insertWorkspaceAndAdvanceOperation(value, operationId, expectedPhase, nextPhase, updatedAt);
     },
     archiveWorkspaceAndAdvanceOperation(
       workspaceId: string,

@@ -1,0 +1,42 @@
+{
+  "name": "@watt/cloud-daemon",
+  "version": "0.0.1",
+  "private": true,
+  "bin": {
+    "watt-cloud-daemon": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "package:linux": "node ../../scripts/package-linux-cloud-daemon.mjs",
+    "smoke:linux": "node ../../scripts/smoke-linux-cloud-daemon.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.9",
+    "@watt/host": "workspace:*",
+    "@watt/host-protocol": "workspace:*",
+    "execa": "^9.6.0",
+    "hono": "^4.13.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@watt/typescript-config": "workspace:*",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

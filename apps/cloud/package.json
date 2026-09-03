@@ -1,0 +1,39 @@
+{
+  "name": "@watt/cloud-api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --minify",
+    "build": "wrangler deploy --dry-run --env='' --outdir dist",
+    "check-types": "tsc --noEmit",
+    "test": "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@127.0.0.1:5432/watt_test vitest run",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "cf-typegen:check": "wrangler types --env-interface CloudflareBindings --check",
+    "startup:check": "wrangler check startup",
+    "smoke:provider": "node scripts/provider-smoke.mjs",
+    "db:check": "drizzle-kit check",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/migrate.mjs",
+    "auth:generate": "pnpm dlx auth@1.7.2 generate --adapter drizzle --dialect postgresql --config src/auth.cli.ts --output src/db/auth-schema.ts --yes && node scripts/normalize-auth-schema.mjs && oxfmt --write src/db/auth-schema.ts"
+  },
+  "dependencies": {
+    "@better-auth/oauth-provider": "1.7.2",
+    "@upstash/box": "0.7.1",
+    "better-auth": "1.7.2",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.13.5",
+    "jose": "6.2.3",
+    "postgres": "3.4.9",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.1.2",
+    "@types/node": "^22.15.0",
+    "drizzle-kit": "0.31.10",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.127.1"
+  }
+}

@@ -53,12 +53,9 @@ codesign(
 );
 codesign(path.join(macos, "watt-desktop"));
 codesign(app);
-const verify = spawnSync(
-  "codesign",
-  ["--verify", "--deep", "--strict", "--verbose=2", app],
-  { stdio: "inherit" },
-);
+const verify = spawnSync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app], {
+  stdio: "inherit",
+});
 if (verify.error) throw verify.error;
-if (verify.status !== 0)
-  throw new Error("packaged application signature verification failed");
+if (verify.status !== 0) throw new Error("packaged application signature verification failed");
 console.log(`Desktop app: ${path.relative(root, app)}`);

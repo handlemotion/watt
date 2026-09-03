@@ -41,7 +41,5 @@ export const DEFAULT_CODEX_CATALOG: ModelCapability[] = [
 ];
 
 export function upstreamCodexModelId(id: string): string {
-  return id.startsWith(CODEX_MODEL_PREFIX)
-    ? id.slice(CODEX_MODEL_PREFIX.length)
-    : id;
+  return id.startsWith(CODEX_MODEL_PREFIX) ? id.slice(CODEX_MODEL_PREFIX.length) : id;
 }

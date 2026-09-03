@@ -1,7 +1,4 @@
-import {
-  DEFAULT_CODEX_CATALOG,
-  upstreamCodexModelId,
-} from "./codex-catalog.js";
+import { DEFAULT_CODEX_CATALOG, upstreamCodexModelId } from "./codex-catalog.js";
 import { mapCodexStreamEvent } from "./codex-events.js";
 import { AgentError } from "./errors.js";
 import type {
@@ -13,11 +10,9 @@ import type {
   WattRunResult,
 } from "./types.js";
 
-export type CodexSandboxMode =
-  "read-only" | "workspace-write" | "danger-full-access";
+export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
-export type CodexApprovalPolicy =
-  "untrusted" | "on-failure" | "on-request" | "never";
+export type CodexApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
 
 export type CodexThreadOptions = {
   workingDirectory: string;
@@ -38,10 +33,7 @@ export type CodexThreadHandle = {
 
 export type CodexClient = {
   startThread: (options: CodexThreadOptions) => CodexThreadHandle;
-  resumeThread: (
-    threadId: string,
-    options?: CodexThreadOptions,
-  ) => CodexThreadHandle;
+  resumeThread: (threadId: string, options?: CodexThreadOptions) => CodexThreadHandle;
 };
 
 function sandboxMode(enabled: boolean): CodexSandboxMode {
@@ -50,15 +42,8 @@ function sandboxMode(enabled: boolean): CodexSandboxMode {
 
 function isAuthFailure(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
-  const code =
-    "code" in error && typeof error.code === "string"
-      ? error.code.toLowerCase()
-      : "";
-  if (
-    code === "codex_auth_unavailable" ||
-    code.includes("unauthorized") ||
-    code === "401"
-  ) {
+  const code = "code" in error && typeof error.code === "string" ? error.code.toLowerCase() : "";
+  if (code === "codex_auth_unavailable" || code.includes("unauthorized") || code === "401") {
     return true;
   }
   const message =
@@ -117,8 +102,7 @@ function wrapThreadRun(
               status = "error";
               if (isAuthFailure({ message: mapped.message })) {
                 error = {
-                  message:
-                    "Codex is not signed in with ChatGPT. Run `codex login`.",
+                  message: "Codex is not signed in with ChatGPT. Run `codex login`.",
                   code: "codex_auth_unavailable",
                 };
                 yield { type: "error", message: error.message };
@@ -146,8 +130,7 @@ function wrapThreadRun(
         } else {
           status = "error";
           error = {
-            message:
-              caught instanceof Error ? caught.message : "codex run failed",
+            message: caught instanceof Error ? caught.message : "codex run failed",
           };
           yield { type: "error", message: error.message };
         }
@@ -192,9 +175,7 @@ function bindThread(
 }
 
 function threadOptions(input: CreateRuntimeInput): CodexThreadOptions {
-  const effort = input.model.params.find(
-    (parameter) => parameter.id === "effort",
-  )?.value;
+  const effort = input.model.params.find((parameter) => parameter.id === "effort")?.value;
   return {
     workingDirectory: input.cwd,
     skipGitRepoCheck: true,
@@ -230,7 +211,11 @@ async function loadSdkClient(): Promise<CodexClient> {
           instance.startThread({
             ...options,
             modelReasoningEffort: options.modelReasoningEffort as
-              "low" | "medium" | "high" | "xhigh" | undefined,
+              | "low"
+              | "medium"
+              | "high"
+              | "xhigh"
+              | undefined,
           }),
         ),
       resumeThread: (threadId, options) =>
@@ -238,7 +223,11 @@ async function loadSdkClient(): Promise<CodexClient> {
           instance.resumeThread(threadId, {
             ...options,
             modelReasoningEffort: options?.modelReasoningEffort as
-              "low" | "medium" | "high" | "xhigh" | undefined,
+              | "low"
+              | "medium"
+              | "high"
+              | "xhigh"
+              | undefined,
           }),
         ),
     };
@@ -246,9 +235,7 @@ async function loadSdkClient(): Promise<CodexClient> {
   return sdkPromise;
 }
 
-export function createCodexRuntime(options?: {
-  client?: CodexClient;
-}): CursorRuntime {
+export function createCodexRuntime(options?: { client?: CodexClient }): CursorRuntime {
   const liveRuns = new Map<string, CursorRun>();
   const turnIds = new Map<string, number>();
 
@@ -273,10 +260,7 @@ export function createCodexRuntime(options?: {
     },
     async create(input: CreateRuntimeInput) {
       if (input.mode !== "agent") {
-        throw new AgentError(
-          "Codex runtime supports agent mode only",
-          "mode_unsupported",
-        );
+        throw new AgentError("Codex runtime supports agent mode only", "mode_unsupported");
       }
       try {
         const handle = (await client()).startThread(threadOptions(input));
@@ -287,16 +271,10 @@ export function createCodexRuntime(options?: {
     },
     async resume(input: ResumeRuntimeInput) {
       if (input.mode !== "agent") {
-        throw new AgentError(
-          "Codex runtime supports agent mode only",
-          "mode_unsupported",
-        );
+        throw new AgentError("Codex runtime supports agent mode only", "mode_unsupported");
       }
       try {
-        const handle = (await client()).resumeThread(
-          input.agentId,
-          threadOptions(input),
-        );
+        const handle = (await client()).resumeThread(input.agentId, threadOptions(input));
         return bindThread(handle, liveRuns, turnIds);
       } catch (error) {
         throwAuthOr(error);

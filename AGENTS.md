@@ -5,3 +5,5 @@ Watt is a Cursor-native worktree host with libraries, a CLI, and a Svelte 5 + Ta
 ## Desktop shell icons
 
 Use **Central Icons Medium variants only** (`IconChevronRightMedium`, `IconPlusMedium`, etc.). Scale with the icon `size` prop — never pick `Small`, `Large`, or `Big` variants to tune visual weight. If no Medium export exists, use the base icon name and still scale with `size`.
+
+The personal cloud path is a separate backend: `apps/cloud` is a Cloudflare Worker + Hono control plane and `@watt/cloud-daemon` runs the same Host in one Upstash Box per account. Do not route the local desktop through HTTP, add WebSocket/Electron/ACP, or add product UI in this repository. Upstash Box is the only cloud runtime until SPEC.md changes.

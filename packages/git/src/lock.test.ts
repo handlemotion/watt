@@ -3,8 +3,7 @@ import { describe, expect, it } from "vitest";
 import { RepoLock } from "./lock.js";
 
 function size(lock: RepoLock): number {
-  return (lock as unknown as { chains: Map<string, Promise<unknown>> }).chains
-    .size;
+  return (lock as unknown as { chains: Map<string, Promise<unknown>> }).chains.size;
 }
 
 describe("RepoLock", () => {
@@ -31,17 +30,10 @@ describe("RepoLock", () => {
     expect(order).toEqual(["first-start", "other-repo"]);
     releaseFirst?.();
     await Promise.all([first, follower]);
-    expect(order).toEqual([
-      "first-start",
-      "other-repo",
-      "first-end",
-      "follower",
-    ]);
+    expect(order).toEqual(["first-start", "other-repo", "first-end", "follower"]);
 
     await Promise.all(
-      Array.from({ length: 100 }, (_, index) =>
-        lock.run(`repo-${index}`, async () => undefined),
-      ),
+      Array.from({ length: 100 }, (_, index) => lock.run(`repo-${index}`, async () => undefined)),
     );
     expect(size(lock)).toBe(0);
   });

@@ -127,9 +127,7 @@ const executionPolicy = {
   settingSources: ["project", "user", "plugins"] as const,
 };
 
-function messages(
-  ...items: SdkStreamMessage[]
-): AsyncIterable<SdkStreamMessage> {
+function messages(...items: SdkStreamMessage[]): AsyncIterable<SdkStreamMessage> {
   return {
     async *[Symbol.asyncIterator]() {
       for (const item of items) {
@@ -276,9 +274,7 @@ describe("mapSdkMessage", () => {
   });
 
   it("ignores unknown and malformed SDK messages", () => {
-    expect(
-      mapUnknownSdkMessage({ type: "future_event", text: "ignored" }),
-    ).toEqual([]);
+    expect(mapUnknownSdkMessage({ type: "future_event", text: "ignored" })).toEqual([]);
     expect(
       mapUnknownSdkMessage({
         type: "tool_call",
@@ -348,9 +344,7 @@ describe("createAgent", () => {
       "plugins",
     ]);
     expect(
-      runtime.created[0]?.customTools.some(
-        (tool) => tool.name === WATT_WORKSPACE_INFO_TOOL,
-      ),
+      runtime.created[0]?.customTools.some((tool) => tool.name === WATT_WORKSPACE_INFO_TOOL),
     ).toBe(true);
     expect(runtime.created[0]).toMatchObject({
       model,
@@ -363,10 +357,7 @@ describe("createAgent", () => {
       },
     });
     expect(
-      events.every(
-        (event) =>
-          !JSON.stringify(event).includes("secret-key-should-not-appear"),
-      ),
+      events.every((event) => !JSON.stringify(event).includes("secret-key-should-not-appear")),
     ).toBe(true);
 
     const resumed = await agent.resume({
@@ -379,9 +370,7 @@ describe("createAgent", () => {
     });
     expect(resumed.cursorAgentId).toBe("agent_new");
     expect(
-      runtime.resumed[0]?.customTools.some(
-        (tool) => tool.name === WATT_WORKSPACE_INFO_TOOL,
-      ),
+      runtime.resumed[0]?.customTools.some((tool) => tool.name === WATT_WORKSPACE_INFO_TOOL),
     ).toBe(true);
 
     const recovered = await agent.getRun({
@@ -432,9 +421,7 @@ describe("createAgent", () => {
     });
     const run = await session.send("go");
     const controller = new AbortController();
-    const iterator = run
-      .stream({ signal: controller.signal })
-      [Symbol.asyncIterator]();
+    const iterator = run.stream({ signal: controller.signal })[Symbol.asyncIterator]();
 
     await expect(iterator.next()).resolves.toMatchObject({
       done: false,

@@ -6,9 +6,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PRODUCT_PACKAGE = path.join("packages", "cli", "package.json");
 
 export function readProductVersion(repoRoot = root) {
-  const manifest = JSON.parse(
-    readFileSync(path.join(repoRoot, PRODUCT_PACKAGE), "utf8"),
-  );
+  const manifest = JSON.parse(readFileSync(path.join(repoRoot, PRODUCT_PACKAGE), "utf8"));
   if (typeof manifest.version !== "string" || manifest.version.length === 0) {
     throw new Error(`missing version in ${PRODUCT_PACKAGE}`);
   }
@@ -28,31 +26,11 @@ function replaceNamedVersion(source, name, version) {
   return next;
 }
 
-export function syncReleaseVersion(
-  repoRoot = root,
-  version = readProductVersion(repoRoot),
-) {
+export function syncReleaseVersion(repoRoot = root, version = readProductVersion(repoRoot)) {
   const rootManifestPath = path.join(repoRoot, "package.json");
-  const cargoTomlPath = path.join(
-    repoRoot,
-    "apps",
-    "desktop",
-    "src-tauri",
-    "Cargo.toml",
-  );
-  const cargoLockPath = path.join(
-    repoRoot,
-    "apps",
-    "desktop",
-    "src-tauri",
-    "Cargo.lock",
-  );
-  const desktopManifestPath = path.join(
-    repoRoot,
-    "apps",
-    "desktop",
-    "package.json",
-  );
+  const cargoTomlPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "Cargo.toml");
+  const cargoLockPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "Cargo.lock");
+  const desktopManifestPath = path.join(repoRoot, "apps", "desktop", "package.json");
 
   const rootManifest = JSON.parse(readFileSync(rootManifestPath, "utf8"));
   rootManifest.version = version;
@@ -63,16 +41,10 @@ export function syncReleaseVersion(
   writeJson(desktopManifestPath, desktopManifest);
 
   const cargoToml = readFileSync(cargoTomlPath, "utf8");
-  writeFileSync(
-    cargoTomlPath,
-    replaceNamedVersion(cargoToml, "watt-desktop", version),
-  );
+  writeFileSync(cargoTomlPath, replaceNamedVersion(cargoToml, "watt-desktop", version));
 
   const cargoLock = readFileSync(cargoLockPath, "utf8");
-  writeFileSync(
-    cargoLockPath,
-    replaceNamedVersion(cargoLock, "watt-desktop", version),
-  );
+  writeFileSync(cargoLockPath, replaceNamedVersion(cargoLock, "watt-desktop", version));
 
   return version;
 }

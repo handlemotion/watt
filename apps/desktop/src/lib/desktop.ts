@@ -28,18 +28,11 @@ export function openTerminal(
   return invoke("terminal_open", { workspaceId, cols, rows, onEvent: channel });
 }
 
-export function writeTerminal(
-  terminalId: string,
-  data: Uint8Array,
-): Promise<void> {
+export function writeTerminal(terminalId: string, data: Uint8Array): Promise<void> {
   return invoke("terminal_write", { terminalId, data: Array.from(data) });
 }
 
-export function resizeTerminal(
-  terminalId: string,
-  cols: number,
-  rows: number,
-): Promise<void> {
+export function resizeTerminal(terminalId: string, cols: number, rows: number): Promise<void> {
   return invoke("terminal_resize", { terminalId, cols, rows });
 }
 

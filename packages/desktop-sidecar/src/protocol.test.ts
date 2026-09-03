@@ -1,12 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { PassThrough, Writable } from "node:stream";
 
-import {
-  HostError,
-  type HostCapabilities,
-  type RunResult,
-  type Session,
-} from "@watt/host";
+import { HostError, type HostCapabilities, type RunResult, type Session } from "@watt/host";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -39,10 +34,7 @@ type Fixture = {
 
 async function fixtures(): Promise<Fixture[]> {
   return JSON.parse(
-    await readFile(
-      new URL("../test/fixtures/protocol-fixtures.json", import.meta.url),
-      "utf8",
-    ),
+    await readFile(new URL("../test/fixtures/protocol-fixtures.json", import.meta.url), "utf8"),
   ) as Fixture[];
 }
 
@@ -169,6 +161,27 @@ function fakeHost(): TransportHost {
         };
       },
     },
+    cloud: {
+      async prepareBase() {
+        return { baseSha: "a".repeat(40), baseRef: "main" };
+      },
+    },
+    changesets: {
+      async pull() {
+        return {
+          state: "applied",
+          localSha: "a".repeat(40),
+          remoteSha: "b".repeat(40),
+          head: "c".repeat(40),
+        };
+      },
+      async resolve() {
+        return { state: "applied", head: "c".repeat(40) };
+      },
+      async abort() {
+        return { state: "conflicted", head: "a".repeat(40) };
+      },
+    },
     diagnostics: {
       operations: {
         get: () => undefined,
@@ -231,8 +244,7 @@ describe("desktop sidecar protocol", () => {
     const received: ServerEnvelope[] = [];
     const decoder = new FrameDecoder();
     output.on("data", (chunk: Buffer) => {
-      for (const value of decoder.push(chunk))
-        received.push(value as ServerEnvelope);
+      for (const value of decoder.push(chunk)) received.push(value as ServerEnvelope);
     });
     const host = fakeHost();
     const close = vi.spyOn(host, "close");
@@ -305,8 +317,7 @@ describe("desktop sidecar protocol", () => {
     );
     await waitForLength(received, 8);
     const unsubscribeEnd = received.findIndex(
-      (value) =>
-        value.type === "stream_end" && value.subscriptionId.endsWith("18"),
+      (value) => value.type === "stream_end" && value.subscriptionId.endsWith("18"),
     );
     const unsubscribeAck = received.findIndex(
       (value) => value.type === "result" && value.requestId.endsWith("19"),
@@ -325,8 +336,7 @@ describe("desktop sidecar protocol", () => {
     const received: ServerEnvelope[] = [];
     const decoder = new FrameDecoder();
     output.on("data", (chunk: Buffer) => {
-      for (const value of decoder.push(chunk))
-        received.push(value as ServerEnvelope);
+      for (const value of decoder.push(chunk)) received.push(value as ServerEnvelope);
     });
     const host = fakeHost();
     const close = vi.spyOn(host, "close");
@@ -369,8 +379,7 @@ describe("desktop sidecar protocol", () => {
     const received: ServerEnvelope[] = [];
     const decoder = new FrameDecoder();
     output.on("data", (chunk: Buffer) => {
-      for (const value of decoder.push(chunk))
-        received.push(value as ServerEnvelope);
+      for (const value of decoder.push(chunk)) received.push(value as ServerEnvelope);
     });
     const hostFactory = vi.fn(async () => fakeHost());
     const serving = serveConnection(input, output, hostFactory);
@@ -472,16 +481,13 @@ describe("desktop sidecar protocol", () => {
     const received: ServerEnvelope[] = [];
     const decoder = new FrameDecoder();
     output.on("data", (chunk: Buffer) => {
-      for (const value of decoder.push(chunk))
-        received.push(value as ServerEnvelope);
+      for (const value of decoder.push(chunk)) received.push(value as ServerEnvelope);
     });
     const host = fakeHost();
     let finish!: (result: { runId: string; status: "cancelled" }) => void;
-    const terminal = new Promise<{ runId: string; status: "cancelled" }>(
-      (resolve) => {
-        finish = resolve;
-      },
-    );
+    const terminal = new Promise<{ runId: string; status: "cancelled" }>((resolve) => {
+      finish = resolve;
+    });
     host.runs.wait = async () => terminal;
     host.runs.cancel = async () => {
       const result = { runId: ids.run, status: "cancelled" as const };
@@ -500,6 +506,7 @@ describe("desktop sidecar protocol", () => {
               });
           }),
         ]);
+        yield* [] as never[];
       },
     });
     const serving = serveConnection(input, output, async () => host);
@@ -553,9 +560,7 @@ describe("desktop sidecar protocol", () => {
     });
     expect(
       received.filter(
-        (value) =>
-          value.type === "stream_end" &&
-          value.subscriptionId === subscriptionId,
+        (value) => value.type === "stream_end" && value.subscriptionId === subscriptionId,
       ),
     ).toHaveLength(1);
     input.end();
@@ -568,8 +573,7 @@ describe("desktop sidecar protocol", () => {
     const received: ServerEnvelope[] = [];
     const decoder = new FrameDecoder();
     output.on("data", (chunk: Buffer) => {
-      for (const value of decoder.push(chunk))
-        received.push(value as ServerEnvelope);
+      for (const value of decoder.push(chunk)) received.push(value as ServerEnvelope);
     });
     const host = fakeHost();
     host.runs.attach = () => {
@@ -601,9 +605,7 @@ describe("desktop sidecar protocol", () => {
       fatal: false,
       error: { code: "unknown_run" },
     });
-    expect(received).not.toContainEqual(
-      expect.objectContaining({ type: "stream_end" }),
-    );
+    expect(received).not.toContainEqual(expect.objectContaining({ type: "stream_end" }));
     input.end();
     await serving;
   });
@@ -615,8 +617,7 @@ describe("desktop sidecar protocol", () => {
     const output = new Writable({
       highWaterMark: 1,
       write(chunk: Buffer, _encoding, callback) {
-        for (const value of decoder.push(chunk))
-          received.push(value as ServerEnvelope);
+        for (const value of decoder.push(chunk)) received.push(value as ServerEnvelope);
         setImmediate(callback);
       },
     });
@@ -653,14 +654,11 @@ describe("desktop sidecar protocol", () => {
     );
     await vi.waitFor(() => {
       expect(
-        received.some(
-          (value) => value.type === "result" && value.requestId.endsWith("27"),
-        ),
+        received.some((value) => value.type === "result" && value.requestId.endsWith("27")),
       ).toBe(true);
     });
     const end = received.findIndex(
-      (value) =>
-        value.type === "stream_end" && value.subscriptionId.endsWith("26"),
+      (value) => value.type === "stream_end" && value.subscriptionId.endsWith("26"),
     );
     const acknowledgement = received.findIndex(
       (value) => value.type === "result" && value.requestId.endsWith("27"),

@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    ".context/",
+    ".artifacts/",
+    "**/dist/",
+    "**/target/",
+    "**/*.toml",
+    "apps/desktop/src-tauri/binaries/",
+    "apps/desktop/src-tauri/gen/",
+    "apps/desktop/src-tauri/icons/",
+    "packages/desktop-sidecar/protocol.schema.json",
+    "apps/cloud/worker-configuration.d.ts"
+  ]
+}

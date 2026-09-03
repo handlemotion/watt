@@ -19,19 +19,12 @@ export function nextTerminalSidebarWidth(
   viewportWidth: number,
   leftSidebarWidth = 324,
 ): number {
-  const dynamicMaximum = Math.max(
-    0,
-    Math.min(640, viewportWidth - leftSidebarWidth - 320),
-  );
+  const dynamicMaximum = Math.max(0, Math.min(640, viewportWidth - leftSidebarWidth - 320));
   const minimum = Math.min(300, dynamicMaximum);
-  return Math.round(
-    Math.min(dynamicMaximum, Math.max(minimum, viewportWidth - pointerX)),
-  );
+  return Math.round(Math.min(dynamicMaximum, Math.max(minimum, viewportWidth - pointerX)));
 }
 
-export function isTerminalToggle(
-  event: Pick<KeyboardEvent, "key" | "metaKey">,
-): boolean {
+export function isTerminalToggle(event: Pick<KeyboardEvent, "key" | "metaKey">): boolean {
   return event.metaKey && event.key.toLowerCase() === "j";
 }
 

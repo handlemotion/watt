@@ -129,6 +129,14 @@ INSERT INTO capability_cache_new (key, payload_json, fetched_at)
   SELECT key, payload_json, fetched_at FROM capability_cache;
 DROP TABLE capability_cache;
 ALTER TABLE capability_cache_new RENAME TO capability_cache;
+CREATE TABLE mutation_replays (
+  operation TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  input_json TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (operation, idempotency_key)
+);
 `;
 
 export function migrate(database: SqliteDatabase): void {
@@ -142,9 +150,7 @@ export function migrate(database: SqliteDatabase): void {
     current < 0 ||
     current > VERSION
   ) {
-    throw new Error(
-      `incompatible watt.sqlite user_version: ${String(current)}`,
-    );
+    throw new Error(`incompatible watt.sqlite user_version: ${String(current)}`);
   }
   database.transaction(() => {
     if (current < 1) {

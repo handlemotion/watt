@@ -34,10 +34,7 @@ export const worktrees: Worktree[] = [
 
 export const currentProjectId = "handlemotion";
 
-export function projectById(
-  list: readonly Project[],
-  id: string,
-): Project | undefined {
+export function projectById(list: readonly Project[], id: string): Project | undefined {
   return list.find((project) => project.id === id);
 }
 

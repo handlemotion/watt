@@ -22,12 +22,11 @@ describe("terminal sidebar state", () => {
   });
 
   it("retains opened instances across hiding and workspace switches", () => {
-    expect(
-      retainOpenedTerminalIds(["one", "two"], ["one", "two", "three"]),
-    ).toEqual(["one", "two"]);
-    expect(retainOpenedTerminalIds(["one", "removed"], ["one", "two"])).toEqual(
-      ["one"],
-    );
+    expect(retainOpenedTerminalIds(["one", "two"], ["one", "two", "three"])).toEqual([
+      "one",
+      "two",
+    ]);
+    expect(retainOpenedTerminalIds(["one", "removed"], ["one", "two"])).toEqual(["one"]);
   });
 });
 
@@ -49,12 +48,7 @@ describe("terminal writes", () => {
     expect(order).toEqual(["start:first"]);
     releaseFirst?.();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(order).toEqual([
-      "start:first",
-      "end:first",
-      "start:second",
-      "end:second",
-    ]);
+    expect(order).toEqual(["start:first", "end:first", "start:second", "end:second"]);
   });
 
   it("splits writes larger than 64 KiB", async () => {

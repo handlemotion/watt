@@ -11,9 +11,7 @@ if (target === "cli") {
   );
   createProgram().helpInformation();
 } else if (target === "host") {
-  await import(
-    pathToFileURL(path.join(root, "packages/host/dist/index.js")).href
-  );
+  await import(pathToFileURL(path.join(root, "packages/host/dist/index.js")).href);
 } else {
   throw new Error(`unknown startup target: ${String(target)}`);
 }

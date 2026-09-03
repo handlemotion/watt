@@ -15,8 +15,7 @@ const packagedExecutable = path.join(
 );
 const executable = process.env.WATT_SIDECAR_EXECUTABLE ?? packagedExecutable;
 const executableArguments = executable.endsWith(".js") ? [executable] : [];
-const command =
-  executableArguments.length === 0 ? executable : process.execPath;
+const command = executableArguments.length === 0 ? executable : process.execPath;
 const temporary = mkdtempSync(path.join(tmpdir(), "watt-sidecar-smoke-"));
 const child = spawn(command, executableArguments, {
   stdio: ["pipe", "pipe", "pipe"],

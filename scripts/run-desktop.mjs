@@ -18,11 +18,9 @@ const tauriConf = JSON.parse(
 const devPort = Number(new URL(tauriConf.build.devUrl).port);
 
 function listeningPids(port) {
-  const result = spawnSync(
-    "lsof",
-    ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
-    { encoding: "utf8" },
-  );
+  const result = spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
+    encoding: "utf8",
+  });
   if (result.status !== 0 && result.status !== 1) {
     return [];
   }
@@ -62,9 +60,7 @@ async function freeLeakedDesktopVite(port) {
 
   const deadline = Date.now() + 2000;
   while (Date.now() < deadline) {
-    const leftover = listeningPids(port).filter((pid) =>
-      isDesktopVite(commandFor(pid)),
-    );
+    const leftover = listeningPids(port).filter((pid) => isDesktopVite(commandFor(pid)));
     if (leftover.length === 0) return;
     await delay(50);
   }

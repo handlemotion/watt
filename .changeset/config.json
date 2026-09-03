@@ -1,15 +1,7 @@
 {
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [
-    [
-      "@watt/agent",
-      "@watt/cli",
-      "@watt/desktop-sidecar",
-      "@watt/git",
-      "@watt/host"
-    ]
-  ],
+  "fixed": [["@watt/agent", "@watt/cli", "@watt/desktop-sidecar", "@watt/git", "@watt/host"]],
   "linked": [],
   "access": "restricted",
   "baseBranch": "main",

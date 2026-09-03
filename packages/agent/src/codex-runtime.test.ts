@@ -72,10 +72,7 @@ const officialTurnEvents = [
   },
 ];
 
-function mockClient(options?: {
-  authError?: boolean;
-  events?: unknown[];
-}): CodexClient {
+function mockClient(options?: { authError?: boolean; events?: unknown[] }): CodexClient {
   const events = options?.events ?? officialTurnEvents;
   function thread(id: string) {
     return {
@@ -132,9 +129,7 @@ describe("createCodexRuntime", () => {
       },
     });
     const models = await runtime.listModels();
-    expect(models.map((model) => model.id)).toEqual(
-      DEFAULT_CODEX_CATALOG.map((model) => model.id),
-    );
+    expect(models.map((model) => model.id)).toEqual(DEFAULT_CODEX_CATALOG.map((model) => model.id));
     expect(models[0]?.id.startsWith("codex:")).toBe(true);
   });
 
@@ -192,11 +187,9 @@ describe("createCodexRuntime", () => {
     const runtime = createCodexRuntime({
       client: mockClient({ authError: true }),
     });
-    await expect(runtime.create(input({ mode: "plan" }))).rejects.toMatchObject(
-      {
-        code: "mode_unsupported",
-      },
-    );
+    await expect(runtime.create(input({ mode: "plan" }))).rejects.toMatchObject({
+      code: "mode_unsupported",
+    });
     await expect(runtime.create(input())).rejects.toBeInstanceOf(AgentError);
     await expect(runtime.create(input())).rejects.toMatchObject({
       code: "codex_auth_unavailable",

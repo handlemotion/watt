@@ -19,9 +19,7 @@ export type WattBoundaryError = Error & {
   readonly details?: Readonly<Record<string, unknown>>;
 };
 
-export function isWattBoundaryError(
-  value: unknown,
-): value is WattBoundaryError {
+export function isWattBoundaryError(value: unknown): value is WattBoundaryError {
   return isHostError(value) || isGitError(value);
 }
 

@@ -7,8 +7,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function textFrom(value: unknown): string | undefined {
   if (typeof value === "string" && value.length > 0) return value;
   if (!isRecord(value)) return undefined;
-  if (typeof value.text === "string" && value.text.length > 0)
-    return value.text;
+  if (typeof value.text === "string" && value.text.length > 0) return value.text;
   if (typeof value.message === "string" && value.message.length > 0) {
     return value.message;
   }
@@ -93,9 +92,7 @@ export function mapCodexStreamEvent(value: unknown): AgentEvent[] {
     if (isToolItem(itemType)) {
       const callId = itemId(item, itemType);
       const name =
-        itemType === "mcp_tool_call" && typeof item.tool === "string"
-          ? item.tool
-          : toolName(item);
+        itemType === "mcp_tool_call" && typeof item.tool === "string" ? item.tool : toolName(item);
       if (type.endsWith("started") || type.endsWith("updated")) {
         if (type.endsWith("updated")) return [];
         return [

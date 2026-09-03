@@ -22,10 +22,7 @@ function asCommandList(
   if (Array.isArray(value)) {
     return value.map((item) => {
       if (typeof item !== "string" || item.trim().length === 0) {
-        throw new GitError(
-          `invalid setup command: ${filePath}`,
-          "config_invalid",
-        );
+        throw new GitError(`invalid setup command: ${filePath}`, "config_invalid");
       }
       return { command: item, cursorScript: false };
     });
@@ -48,10 +45,7 @@ function copyList(value: unknown, filePath: string): string[] {
 
 function cursorScriptPath(value: string, filePath: string): string {
   if (value.trim().length === 0 || path.isAbsolute(value)) {
-    throw new GitError(
-      `invalid Cursor setup script: ${filePath}`,
-      "config_invalid",
-    );
+    throw new GitError(`invalid Cursor setup script: ${filePath}`, "config_invalid");
   }
   const cursorRoot = path.join(path.dirname(filePath));
   const resolved = path.resolve(cursorRoot, value);
@@ -62,17 +56,12 @@ function cursorScriptPath(value: string, filePath: string): string {
     relative.startsWith(`..${path.sep}`) ||
     path.isAbsolute(relative)
   ) {
-    throw new GitError(
-      `Cursor setup script escapes .cursor: ${filePath}`,
-      "config_invalid",
-    );
+    throw new GitError(`Cursor setup script escapes .cursor: ${filePath}`, "config_invalid");
   }
   return path.join(".cursor", relative);
 }
 
-async function readJsonObject(
-  filePath: string,
-): Promise<Record<string, unknown> | null> {
+async function readJsonObject(filePath: string): Promise<Record<string, unknown> | null> {
   let raw: string;
   try {
     raw = await readFile(filePath, "utf8");
@@ -99,12 +88,7 @@ async function readJsonObject(
 }
 
 function isEnoent(cause: unknown): boolean {
-  return (
-    typeof cause === "object" &&
-    cause !== null &&
-    "code" in cause &&
-    cause.code === "ENOENT"
-  );
+  return typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOENT";
 }
 
 export async function loadWorktreeConfig(
@@ -139,9 +123,7 @@ export async function loadWorktreeConfig(
   if (typeof spec === "string") {
     return {
       copy,
-      commands: [
-        { command: cursorScriptPath(spec, cursorFile), cursorScript: true },
-      ],
+      commands: [{ command: cursorScriptPath(spec, cursorFile), cursorScript: true }],
     };
   }
   return { copy, commands: asCommandList(spec, cursorFile) };

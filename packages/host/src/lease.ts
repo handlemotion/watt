@@ -1,14 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  link,
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
+import { link, mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -31,9 +23,7 @@ type HostLeaseOwner = {
 export type HostLease = { release: () => Promise<void> };
 
 function errorCode(error: unknown): string | undefined {
-  return error instanceof Error && "code" in error
-    ? String(error.code)
-    : undefined;
+  return error instanceof Error && "code" in error ? String(error.code) : undefined;
 }
 
 function isOwner(value: unknown): value is HostLeaseOwner {
@@ -66,11 +56,10 @@ async function fingerprint(pid: number): Promise<string | undefined> {
     }
   }
   try {
-    const result = await execFileAsync(
-      "ps",
-      ["-o", "lstart=", "-p", String(pid)],
-      { timeout: 1_000, encoding: "utf8" },
-    );
+    const result = await execFileAsync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      timeout: 1_000,
+      encoding: "utf8",
+    });
     const started = result.stdout.trim();
     return started.length > 0 ? `${process.platform}:${started}` : undefined;
   } catch {
@@ -89,9 +78,7 @@ async function ownerDefinitelyGone(owner: HostLeaseOwner): Promise<boolean> {
   return current !== undefined && current !== owner.processStartFingerprint;
 }
 
-async function readOwner(
-  lockPath: string,
-): Promise<HostLeaseOwner | undefined> {
+async function readOwner(lockPath: string): Promise<HostLeaseOwner | undefined> {
   try {
     const value: unknown = JSON.parse(await readFile(lockPath, "utf8"));
     return isOwner(value) ? value : undefined;
@@ -100,11 +87,7 @@ async function readOwner(
   }
 }
 
-async function reclaim(
-  lockRoot: string,
-  lockPath: string,
-  stale: HostLeaseOwner,
-): Promise<void> {
+async function reclaim(lockRoot: string, lockPath: string, stale: HostLeaseOwner): Promise<void> {
   const claimPath = path.join(lockRoot, `reclaim-${stale.leaseId}`);
   try {
     await mkdir(claimPath);
@@ -114,10 +97,7 @@ async function reclaim(
   }
   try {
     const current = await readOwner(lockPath);
-    if (
-      current?.leaseId === stale.leaseId &&
-      (await ownerDefinitelyGone(current))
-    ) {
+    if (current?.leaseId === stale.leaseId && (await ownerDefinitelyGone(current))) {
       await unlink(lockPath).catch((error: unknown) => {
         if (errorCode(error) !== "ENOENT") throw error;
       });
@@ -134,10 +114,7 @@ async function delay(milliseconds: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-export async function acquireHostLease(
-  stateDir: string,
-  timeoutMs: number,
-): Promise<HostLease> {
+export async function acquireHostLease(stateDir: string, timeoutMs: number): Promise<HostLease> {
   const lockRoot = path.join(stateDir, ".watt-locks");
   const owners = path.join(lockRoot, "owners");
   const lockPath = path.join(lockRoot, "host.lock");
@@ -179,11 +156,9 @@ export async function acquireHostLease(
         break;
       } catch (error) {
         if (errorCode(error) !== "EEXIST") {
-          throw new HostError(
-            "could not acquire the Host state lease",
-            "host_lease_unavailable",
-            { cause: error },
-          );
+          throw new HostError("could not acquire the Host state lease", "host_lease_unavailable", {
+            cause: error,
+          });
         }
       }
 

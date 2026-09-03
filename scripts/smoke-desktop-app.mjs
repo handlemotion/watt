@@ -36,13 +36,9 @@ try {
     });
     if (result.error) throw result.error;
     if (result.status !== 0)
-      throw new Error(
-        `desktop smoke test failed (${result.status}): ${result.stderr.trim()}`,
-      );
+      throw new Error(`desktop smoke test failed (${result.status}): ${result.stderr.trim()}`);
     if (!result.stdout.includes(smoke.expected)) {
-      throw new Error(
-        `desktop smoke test returned unexpected output: ${result.stdout.trim()}`,
-      );
+      throw new Error(`desktop smoke test returned unexpected output: ${result.stdout.trim()}`);
     }
     process.stdout.write(result.stdout);
   }

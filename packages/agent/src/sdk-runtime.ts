@@ -60,16 +60,11 @@ function modelCapability(model: SDKModel): ModelCapability {
     variants: (model.variants ?? []).map((variant) => ({
       params: variant.params.map((parameter) => ({ ...parameter })),
       displayName: variant.displayName,
-      ...(variant.description === undefined
-        ? {}
-        : { description: variant.description }),
-      ...(variant.isDefault === undefined
-        ? {}
-        : { isDefault: variant.isDefault }),
+      ...(variant.description === undefined ? {} : { description: variant.description }),
+      ...(variant.isDefault === undefined ? {} : { isDefault: variant.isDefault }),
     })),
   };
-  if (model.description !== undefined)
-    capability.description = model.description;
+  if (model.description !== undefined) capability.description = model.description;
   return capability;
 }
 
@@ -86,13 +81,9 @@ type SdkRunLike = {
   cancel: () => Promise<void>;
 };
 
-function mapRunResult(
-  result: Awaited<ReturnType<SdkRunLike["wait"]>>,
-): WattRunResult {
+function mapRunResult(result: Awaited<ReturnType<SdkRunLike["wait"]>>): WattRunResult {
   const status =
-    result.status === "finished" ||
-    result.status === "error" ||
-    result.status === "cancelled"
+    result.status === "finished" || result.status === "error" || result.status === "cancelled"
       ? result.status
       : "error";
   const mapped: WattRunResult = { status };
@@ -109,10 +100,7 @@ function mapRunResult(
   return mapped;
 }
 
-function wrapSdkRun(
-  run: SdkRunLike,
-  detach: () => void | Promise<void>,
-): CursorRun {
+function wrapSdkRun(run: SdkRunLike, detach: () => void | Promise<void>): CursorRun {
   return {
     cursorRunId: run.id,
     async *stream() {
@@ -131,10 +119,7 @@ function wrapSdkRun(
   };
 }
 
-function wrapSdkAgent(
-  agent: SDKAgent,
-  input: CreateRuntimeInput,
-): CursorAgentHandle {
+function wrapSdkAgent(agent: SDKAgent, input: CreateRuntimeInput): CursorAgentHandle {
   return {
     agentId: agent.agentId,
     async send(prompt, options) {
@@ -162,9 +147,7 @@ export function createSdkRuntime(): CursorRuntime {
   return {
     async listModels(input) {
       const { Cursor } = await loadSdk();
-      return (await Cursor.models.list({ apiKey: input?.apiKey })).map(
-        modelCapability,
-      );
+      return (await Cursor.models.list({ apiKey: input?.apiKey })).map(modelCapability);
     },
     async create(input: CreateRuntimeInput) {
       const { Agent } = await loadSdk();

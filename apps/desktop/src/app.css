@@ -14,8 +14,7 @@
   --color-composer-action: #f1f1f1;
   --color-pr-bg: #d7f2cd;
   --color-pr-fg: #08bd32;
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   --text-nav: 14px;
   --text-nav--line-height: normal;
   --text-nav--letter-spacing: -0.42px;
