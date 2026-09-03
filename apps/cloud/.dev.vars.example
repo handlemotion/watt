@@ -1,0 +1,11 @@
+# Placeholder values used only to keep generated Worker binding types deterministic.
+BETTER_AUTH_SECRET=watt-placeholder-better-auth-secret
+BETTER_AUTH_URL=http://127.0.0.1:8787
+GITHUB_CLIENT_ID=watt-placeholder-github-client-id
+GITHUB_CLIENT_SECRET=watt-placeholder-github-client-secret
+GITHUB_APP_ID=watt-placeholder-github-app-id
+GITHUB_APP_PRIVATE_KEY=watt-placeholder-github-app-private-key
+UPSTASH_BOX_API_KEY=watt-placeholder-upstash-box-api-key
+CLOUD_DAEMON_TOKEN=watt-placeholder-cloud-daemon-token
+CURSOR_API_KEY=watt-placeholder-cursor-api-key
+GITHUB_WEBHOOK_SECRET=watt-placeholder-github-webhook-secret

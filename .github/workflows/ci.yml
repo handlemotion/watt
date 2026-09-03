@@ -43,6 +43,17 @@ jobs:
       - name: Run Node.js checks
         run: pnpm check
 
+      - name: Check cloud deployment artifacts
+        run: |
+          pnpm --filter @watt/cloud-api cf-typegen:check
+          pnpm --filter @watt/cloud-api db:check
+          pnpm --filter @watt/cloud-api startup:check
+
+      - name: Package and smoke Linux cloud daemon
+        run: |
+          pnpm --filter @watt/cloud-daemon package:linux
+          pnpm --filter @watt/cloud-daemon smoke:linux
+
   desktop:
     name: Desktop
     runs-on: macos-26

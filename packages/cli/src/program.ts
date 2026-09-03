@@ -14,9 +14,7 @@ function collect(value: string, previous: string[]): string[] {
   return [...previous, value];
 }
 
-function parseModelParams(
-  values: string[],
-): Array<{ id: string; value: string }> {
+function parseModelParams(values: string[]): Array<{ id: string; value: string }> {
   const seen = new Set<string>();
   return values.map((entry) => {
     const separator = entry.indexOf("=");
@@ -36,9 +34,7 @@ function parseMode(value: string | undefined): "agent" | "plan" {
   throw new Error(`invalid --mode: ${value}; expected agent or plan`);
 }
 
-function parseRuntime(
-  value: string | undefined,
-): "cursor-local" | "codex-local" {
+function parseRuntime(value: string | undefined): "cursor-local" | "codex-local" {
   if (value === undefined || value === "cursor") return "cursor-local";
   if (value === "chatgpt") return "codex-local";
   throw new Error(`invalid --runtime: ${value}; expected cursor or chatgpt`);
@@ -47,9 +43,7 @@ function parseRuntime(
 function parseSequence(value: string): number {
   const sequence = Number(value);
   if (!Number.isSafeInteger(sequence) || sequence < 0) {
-    throw new Error(
-      `invalid sequence: ${value}; expected a non-negative integer`,
-    );
+    throw new Error(`invalid sequence: ${value}; expected a non-negative integer`);
   }
   return sequence;
 }
@@ -65,9 +59,7 @@ async function waitForDispatch(host: Host, runId: string) {
     if (run.status !== "queued") {
       if (run.status === "error") {
         const result = await host.runs.wait({ runId });
-        throw new Error(
-          `run failed before detach: ${result.error?.message ?? "unknown error"}`,
-        );
+        throw new Error(`run failed before detach: ${result.error?.message ?? "unknown error"}`);
       }
       return run;
     }
@@ -75,9 +67,7 @@ async function waitForDispatch(host: Host, runId: string) {
   }
 }
 
-function assertDetachSupported(
-  runtime: ReturnType<typeof parseRuntime> | undefined,
-): void {
+function assertDetachSupported(runtime: ReturnType<typeof parseRuntime> | undefined): void {
   if (runtime === "codex-local") {
     throw new Error(
       "Codex sessions do not support --detach because in-flight runs cannot be recovered after CLI exit",
@@ -107,9 +97,7 @@ async function withHost<T>(
   });
   try {
     const project =
-      registerRepo && opts.repo
-        ? await host.projects.register(path.resolve(opts.repo))
-        : undefined;
+      registerRepo && opts.repo ? await host.projects.register(path.resolve(opts.repo)) : undefined;
     return await run(host, project);
   } finally {
     await host.suspend();
@@ -122,11 +110,7 @@ export function createProgram(): Command {
     .name("watt")
     .description("Cursor-native worktree host")
     .option("--repo <path>", "git checkout to register")
-    .option(
-      "--state-dir <dir>",
-      "sqlite state directory",
-      path.join(homedir(), ".watt"),
-    )
+    .option("--state-dir <dir>", "sqlite state directory", path.join(homedir(), ".watt"))
     .option("--worktree-root <dir>", "directory for sibling worktrees");
 
   const worktree = program.command("worktree");
@@ -164,17 +148,12 @@ export function createProgram(): Command {
     .requiredOption("--workspace <id>", "workspace id")
     .action(async (flags: { workspace: string }) => {
       const opts = program.opts<GlobalOpts>();
-      await withHost(
-        opts,
-        Boolean(opts.repo),
-        Boolean(opts.repo),
-        async (host) => {
-          const workspace = await host.workspaces.archive({
-            workspaceId: flags.workspace,
-          });
-          writeJson(workspace);
-        },
-      );
+      await withHost(opts, Boolean(opts.repo), Boolean(opts.repo), async (host) => {
+        const workspace = await host.workspaces.archive({
+          workspaceId: flags.workspace,
+        });
+        writeJson(workspace);
+      });
     });
 
   program.command("capabilities").action(async () => {
@@ -208,10 +187,7 @@ export function createProgram(): Command {
     .action(async (flags: { operation: string }) => {
       const opts = program.opts<GlobalOpts>();
       await withHost(opts, false, false, async (host) => {
-        writeJson(
-          host.diagnostics.operations.get({ operationId: flags.operation }) ??
-            null,
-        );
+        writeJson(host.diagnostics.operations.get({ operationId: flags.operation }) ?? null);
       });
     });
   operation
@@ -219,30 +195,20 @@ export function createProgram(): Command {
     .option("--project <id>", "project id")
     .option("--workspace <id>", "workspace id")
     .option("--include-completed", "include completed operations")
-    .action(
-      async (flags: {
-        project?: string;
-        workspace?: string;
-        includeCompleted?: boolean;
-      }) => {
-        const opts = program.opts<GlobalOpts>();
-        await withHost(opts, false, false, async (host) => {
-          writeJson(
-            host.diagnostics.operations.list({
-              ...(flags.project === undefined
-                ? {}
-                : { projectId: flags.project }),
-              ...(flags.workspace === undefined
-                ? {}
-                : { workspaceId: flags.workspace }),
-              ...(flags.includeCompleted === undefined
-                ? {}
-                : { includeCompleted: flags.includeCompleted }),
-            }),
-          );
-        });
-      },
-    );
+    .action(async (flags: { project?: string; workspace?: string; includeCompleted?: boolean }) => {
+      const opts = program.opts<GlobalOpts>();
+      await withHost(opts, false, false, async (host) => {
+        writeJson(
+          host.diagnostics.operations.list({
+            ...(flags.project === undefined ? {} : { projectId: flags.project }),
+            ...(flags.workspace === undefined ? {} : { workspaceId: flags.workspace }),
+            ...(flags.includeCompleted === undefined
+              ? {}
+              : { includeCompleted: flags.includeCompleted }),
+          }),
+        );
+      });
+    });
 
   const agent = program.command("agent");
   agent
@@ -261,12 +227,7 @@ export function createProgram(): Command {
     .option("--session <id>", "existing session id for a follow-up")
     .requiredOption("-p, --prompt <text>", "prompt")
     .option("--model <id>", "model id")
-    .option(
-      "--model-param <id=value>",
-      "selected model parameter (repeatable)",
-      collect,
-      [],
-    )
+    .option("--model-param <id=value>", "selected model parameter (repeatable)", collect, [])
     .option("--mode <agent|plan>", "conversation mode")
     .option("--runtime <cursor|chatgpt>", "agent runtime")
     .option("--detach", "return after durable Cursor provider dispatch")
@@ -283,9 +244,7 @@ export function createProgram(): Command {
       }) => {
         const opts = program.opts<GlobalOpts>();
         if (Boolean(flags.workspace) === Boolean(flags.session)) {
-          throw new Error(
-            "exactly one of --workspace or --session is required",
-          );
+          throw new Error("exactly one of --workspace or --session is required");
         }
         const params = parseModelParams(flags.modelParam);
         if (!flags.model && params.length > 0) {
@@ -303,9 +262,7 @@ export function createProgram(): Command {
           );
         }
         const mode = flags.workspace ? parseMode(flags.mode) : undefined;
-        const runtime = flags.workspace
-          ? parseRuntime(flags.runtime)
-          : undefined;
+        const runtime = flags.workspace ? parseRuntime(flags.runtime) : undefined;
         if (flags.detach) assertDetachSupported(runtime);
         await withHost(opts, false, false, async (host) => {
           if (flags.detach && flags.session) {
@@ -316,10 +273,7 @@ export function createProgram(): Command {
                 workspaceId: flags.workspace,
                 prompt: flags.prompt,
                 runtime,
-                model:
-                  flags.model === undefined
-                    ? undefined
-                    : { id: flags.model, params },
+                model: flags.model === undefined ? undefined : { id: flags.model, params },
                 mode,
               })
             : await host.sessions.send({
@@ -375,19 +329,13 @@ export function createProgram(): Command {
   run
     .command("attach")
     .requiredOption("--run <id>", "run id")
-    .option(
-      "--after-sequence <number>",
-      "exclusive event sequence cursor",
-      parseSequence,
-    )
+    .option("--after-sequence <number>", "exclusive event sequence cursor", parseSequence)
     .action(async (flags: { run: string; afterSequence?: number }) => {
       const opts = program.opts<GlobalOpts>();
       await withHost(opts, false, false, async (host) => {
         for await (const event of host.runs.attach({
           runId: flags.run,
-          ...(flags.afterSequence === undefined
-            ? {}
-            : { afterSequence: flags.afterSequence }),
+          ...(flags.afterSequence === undefined ? {} : { afterSequence: flags.afterSequence }),
         })) {
           writeJson(event);
         }

@@ -1,14 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  link,
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
+import { link, mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -20,9 +12,7 @@ const execFileAsync = promisify(execFile);
 const POLL_MS = 25;
 
 function errorCode(error: unknown): string | undefined {
-  return error instanceof Error && "code" in error
-    ? String(error.code)
-    : undefined;
+  return error instanceof Error && "code" in error ? String(error.code) : undefined;
 }
 
 function isOwner(value: unknown): value is RepositoryLeaseOwner {
@@ -36,9 +26,10 @@ function isOwner(value: unknown): value is RepositoryLeaseOwner {
     typeof candidate.repositoryIdentity === "string" &&
     (candidate.operation === "create_worktree" ||
       candidate.operation === "archive_worktree" ||
-      candidate.operation === "recover_workspace_operation") &&
-    (candidate.operationId === undefined ||
-      typeof candidate.operationId === "string") &&
+      candidate.operation === "recover_workspace_operation" ||
+      candidate.operation === "integrate_changeset" ||
+      candidate.operation === "publish_cloud_seed") &&
+    (candidate.operationId === undefined || typeof candidate.operationId === "string") &&
     typeof candidate.pid === "number" &&
     Number.isInteger(candidate.pid) &&
     candidate.pid > 0 &&
@@ -64,11 +55,10 @@ async function fingerprint(pid: number): Promise<string | undefined> {
     }
   }
   try {
-    const result = await execFileAsync(
-      "ps",
-      ["-o", "lstart=", "-p", String(pid)],
-      { timeout: 1_000, encoding: "utf8" },
-    );
+    const result = await execFileAsync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      timeout: 1_000,
+      encoding: "utf8",
+    });
     const started = result.stdout.trim();
     return started.length > 0 ? `${process.platform}:${started}` : undefined;
   } catch {
@@ -76,9 +66,7 @@ async function fingerprint(pid: number): Promise<string | undefined> {
   }
 }
 
-async function processDefinitelyGone(
-  owner: RepositoryLeaseOwner,
-): Promise<boolean> {
+async function processDefinitelyGone(owner: RepositoryLeaseOwner): Promise<boolean> {
   if (owner.hostname !== os.hostname()) {
     return false;
   }
@@ -91,15 +79,10 @@ async function processDefinitelyGone(
     return false;
   }
   const currentFingerprint = await fingerprint(owner.pid);
-  return (
-    currentFingerprint !== undefined &&
-    currentFingerprint !== owner.processStartFingerprint
-  );
+  return currentFingerprint !== undefined && currentFingerprint !== owner.processStartFingerprint;
 }
 
-async function readOwner(
-  lockPath: string,
-): Promise<RepositoryLeaseOwner | undefined> {
+async function readOwner(lockPath: string): Promise<RepositoryLeaseOwner | undefined> {
   try {
     const value: unknown = JSON.parse(await readFile(lockPath, "utf8"));
     return isOwner(value) ? value : undefined;
@@ -112,6 +95,21 @@ function ownerDetails(
   owner: RepositoryLeaseOwner | undefined,
 ): Readonly<Record<string, unknown>> | undefined {
   return owner ? { owner } : undefined;
+}
+
+async function releaseLease(lockPath: string, leaseId: string, acquired: boolean): Promise<void> {
+  if (!acquired) return;
+  const current = await readOwner(lockPath);
+  if (current?.leaseId !== leaseId) return;
+  try {
+    await unlink(lockPath);
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") {
+      throw new GitError("could not release repository lease", "lease_unavailable", {
+        cause: error,
+      });
+    }
+  }
 }
 
 async function delay(milliseconds: number): Promise<void> {
@@ -137,10 +135,7 @@ export class RepositoryLease {
     const temporaryOwnerPath = `${ownerPath}.${process.pid}.tmp`;
     const processStartFingerprint = await fingerprint(process.pid);
     if (!processStartFingerprint) {
-      throw new GitError(
-        "could not determine the current process identity",
-        "lease_unavailable",
-      );
+      throw new GitError("could not determine the current process identity", "lease_unavailable");
     }
     const owner: RepositoryLeaseOwner = {
       schemaVersion: 1,
@@ -169,13 +164,9 @@ export class RepositoryLease {
           break;
         } catch (error) {
           if (errorCode(error) !== "EEXIST") {
-            throw new GitError(
-              "could not acquire repository lease",
-              "lease_unavailable",
-              {
-                cause: error,
-              },
-            );
+            throw new GitError("could not acquire repository lease", "lease_unavailable", {
+              cause: error,
+            });
           }
         }
 
@@ -185,11 +176,9 @@ export class RepositoryLease {
           continue;
         }
         if (Date.now() >= deadline) {
-          throw new GitError(
-            `repository is busy: ${repositoryIdentity}`,
-            "repo_busy",
-            { details: ownerDetails(current) },
-          );
+          throw new GitError(`repository is busy: ${repositoryIdentity}`, "repo_busy", {
+            details: ownerDetails(current),
+          });
         }
         await delay(Math.min(POLL_MS, Math.max(1, deadline - Date.now())));
       }
@@ -197,22 +186,7 @@ export class RepositoryLease {
       return await task();
     } finally {
       try {
-        if (acquired) {
-          const current = await readOwner(lockPath);
-          if (current?.leaseId === leaseId) {
-            try {
-              await unlink(lockPath);
-            } catch (error) {
-              if (errorCode(error) !== "ENOENT") {
-                throw new GitError(
-                  "could not release repository lease",
-                  "lease_unavailable",
-                  { cause: error },
-                );
-              }
-            }
-          }
-        }
+        await releaseLease(lockPath, leaseId, acquired);
       } finally {
         await rm(ownerPath, { force: true }).catch(() => undefined);
         await rm(temporaryOwnerPath, { force: true }).catch(() => undefined);
@@ -236,10 +210,7 @@ export class RepositoryLease {
     }
     try {
       const current = await readOwner(lockPath);
-      if (
-        current?.leaseId === stale.leaseId &&
-        (await processDefinitelyGone(current))
-      ) {
+      if (current?.leaseId === stale.leaseId && (await processDefinitelyGone(current))) {
         await unlink(lockPath).catch((error: unknown) => {
           if (errorCode(error) !== "ENOENT") {
             throw error;

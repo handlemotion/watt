@@ -25,16 +25,13 @@ const schemaPath =
 const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as JsonObject;
 const schemaId = schema.$id;
 if (typeof schemaId !== "string") throw new Error("protocol schema has no $id");
-const requestDefinition = (schema.$defs as JsonObject | undefined)
-  ?.RequestEnvelope as JsonObject | undefined;
-const requestProperties = requestDefinition?.properties as
-  JsonObject | undefined;
+const requestDefinition = (schema.$defs as JsonObject | undefined)?.RequestEnvelope as
+  | JsonObject
+  | undefined;
+const requestProperties = requestDefinition?.properties as JsonObject | undefined;
 const methodDefinition = requestProperties?.method as JsonObject | undefined;
 const methodEnum = methodDefinition?.enum;
-if (
-  !Array.isArray(methodEnum) ||
-  !methodEnum.every((value) => typeof value === "string")
-) {
+if (!Array.isArray(methodEnum) || !methodEnum.every((value) => typeof value === "string")) {
   throw new Error("protocol schema has no request method enum");
 }
 const hostMethods = new Set<string>(methodEnum);
@@ -56,32 +53,22 @@ function isObject(value: unknown): value is JsonObject {
 }
 
 function assertObject(value: unknown): asserts value is JsonObject {
-  if (!isObject(value))
-    throw new ProtocolError("params must be an object", "invalid_params");
+  if (!isObject(value)) throw new ProtocolError("params must be an object", "invalid_params");
 }
 
-function assertKeys(
-  value: JsonObject,
-  required: string[],
-  optional: string[] = [],
-): void {
+function assertKeys(value: JsonObject, required: string[], optional: string[] = []): void {
   const allowed = new Set([...required, ...optional]);
   for (const key of required) {
-    if (!(key in value))
-      throw new ProtocolError(`missing param: ${key}`, "invalid_params");
+    if (!(key in value)) throw new ProtocolError(`missing param: ${key}`, "invalid_params");
   }
   for (const key of Object.keys(value)) {
-    if (!allowed.has(key))
-      throw new ProtocolError(`unknown param: ${key}`, "invalid_params");
+    if (!allowed.has(key)) throw new ProtocolError(`unknown param: ${key}`, "invalid_params");
   }
 }
 
 function assertString(value: unknown, name: string): asserts value is string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new ProtocolError(
-      `${name} must be a non-empty string`,
-      "invalid_params",
-    );
+    throw new ProtocolError(`${name} must be a non-empty string`, "invalid_params");
   }
 }
 
@@ -134,21 +121,19 @@ export function assertMethodParams(method: HostMethod, params: unknown): void {
       assertKeys(
         params,
         ["projectId", "slug"],
-        ["branch", "baseRef", "copyGlobs"],
+        ["branch", "baseRef", "copyGlobs", "idempotencyKey"],
       );
       assertId(params.projectId, "projectId");
       assertString(params.slug, "slug");
       assertOptionalString(params.branch, "branch");
       assertOptionalString(params.baseRef, "baseRef");
+      assertOptionalString(params.idempotencyKey, "idempotencyKey");
       if (
         params.copyGlobs !== undefined &&
         (!Array.isArray(params.copyGlobs) ||
           !params.copyGlobs.every((entry) => typeof entry === "string"))
       ) {
-        throw new ProtocolError(
-          "copyGlobs must be a string array",
-          "invalid_params",
-        );
+        throw new ProtocolError("copyGlobs must be a string array", "invalid_params");
       }
       return;
     case "workspaces.list":
@@ -157,15 +142,16 @@ export function assertMethodParams(method: HostMethod, params: unknown): void {
       assertOptionalBoolean(params.includeArchived, "includeArchived");
       return;
     case "workspaces.archive":
-      assertKeys(params, ["workspaceId"], ["keepBranch"]);
+      assertKeys(params, ["workspaceId"], ["keepBranch", "idempotencyKey"]);
       assertId(params.workspaceId, "workspaceId");
       assertOptionalBoolean(params.keepBranch, "keepBranch");
+      assertOptionalString(params.idempotencyKey, "idempotencyKey");
       return;
     case "sessions.create":
       assertKeys(
         params,
         ["workspaceId", "prompt"],
-        ["runtime", "model", "mode", "executionPolicy"],
+        ["runtime", "model", "mode", "executionPolicy", "idempotencyKey"],
       );
       assertId(params.workspaceId, "workspaceId");
       assertString(params.prompt, "prompt");
@@ -174,39 +160,28 @@ export function assertMethodParams(method: HostMethod, params: unknown): void {
         params.runtime !== "cursor-local" &&
         params.runtime !== "codex-local"
       ) {
-        throw new ProtocolError(
-          "runtime must be cursor-local or codex-local",
-          "invalid_params",
-        );
+        throw new ProtocolError("runtime must be cursor-local or codex-local", "invalid_runtime");
       }
       if (params.model !== undefined && !isObject(params.model)) {
         throw new ProtocolError("model must be an object", "invalid_params");
       }
-      if (
-        params.mode !== undefined &&
-        params.mode !== "agent" &&
-        params.mode !== "plan"
-      ) {
+      if (params.mode !== undefined && params.mode !== "agent" && params.mode !== "plan") {
         throw new ProtocolError("mode must be agent or plan", "invalid_params");
       }
-      if (
-        params.executionPolicy !== undefined &&
-        !isObject(params.executionPolicy)
-      ) {
-        throw new ProtocolError(
-          "executionPolicy must be an object",
-          "invalid_params",
-        );
+      if (params.executionPolicy !== undefined && !isObject(params.executionPolicy)) {
+        throw new ProtocolError("executionPolicy must be an object", "invalid_params");
       }
+      assertOptionalString(params.idempotencyKey, "idempotencyKey");
       return;
     case "sessions.list":
       assertKeys(params, ["workspaceId"]);
       assertId(params.workspaceId, "workspaceId");
       return;
     case "sessions.send":
-      assertKeys(params, ["sessionId", "prompt"]);
+      assertKeys(params, ["sessionId", "prompt"], ["idempotencyKey"]);
       assertId(params.sessionId, "sessionId");
       assertString(params.prompt, "prompt");
+      assertOptionalString(params.idempotencyKey, "idempotencyKey");
       return;
     case "runs.list":
       assertKeys(params, ["sessionId"]);
@@ -237,41 +212,87 @@ export function assertMethodParams(method: HostMethod, params: unknown): void {
       assertKeys(params, ["subscriptionId"]);
       assertId(params.subscriptionId, "subscriptionId");
       return;
+    case "cloud.prepareBase":
+      assertKeys(
+        params,
+        ["seedId", "workspaceId"],
+        ["remote", "expectedLocalSha", "idempotencyKey"],
+      );
+      assertString(params.seedId, "seedId");
+      assertId(params.workspaceId, "workspaceId");
+      assertOptionalString(params.remote, "remote");
+      assertOptionalString(params.expectedLocalSha, "expectedLocalSha");
+      assertOptionalString(params.idempotencyKey, "idempotencyKey");
+      return;
+    case "changesets.pull":
+      assertKeys(
+        params,
+        ["changesetId", "workspaceId", "remote", "branch", "expectedLocalSha", "idempotencyKey"],
+        ["expectedRemoteSha"],
+      );
+      assertString(params.changesetId, "changesetId");
+      assertId(params.workspaceId, "workspaceId");
+      assertString(params.remote, "remote");
+      assertString(params.branch, "branch");
+      assertString(params.expectedLocalSha, "expectedLocalSha");
+      assertOptionalString(params.expectedRemoteSha, "expectedRemoteSha");
+      assertOptionalString(params.idempotencyKey, "idempotencyKey");
+      return;
+    case "changesets.resolve":
+      assertKeys(
+        params,
+        [
+          "changesetId",
+          "workspaceId",
+          "remote",
+          "branch",
+          "expectedLocalSha",
+          "remoteSha",
+          "idempotencyKey",
+        ],
+        ["expectedRemoteSha"],
+      );
+      assertString(params.changesetId, "changesetId");
+      assertId(params.workspaceId, "workspaceId");
+      assertString(params.remote, "remote");
+      assertString(params.branch, "branch");
+      assertString(params.expectedLocalSha, "expectedLocalSha");
+      assertString(params.remoteSha, "remoteSha");
+      assertOptionalString(params.expectedRemoteSha, "expectedRemoteSha");
+      assertOptionalString(params.idempotencyKey, "idempotencyKey");
+      return;
+    case "changesets.abort":
+      assertKeys(params, ["changesetId", "workspaceId", "expectedLocalSha"], ["idempotencyKey"]);
+      assertString(params.changesetId, "changesetId");
+      assertId(params.workspaceId, "workspaceId");
+      assertString(params.expectedLocalSha, "expectedLocalSha");
+      assertOptionalString(params.idempotencyKey, "idempotencyKey");
+      return;
     case "diagnostics.operations.get":
       assertKeys(params, ["operationId"]);
       assertId(params.operationId, "operationId");
       return;
     case "diagnostics.operations.list":
       assertKeys(params, [], ["projectId", "workspaceId", "includeCompleted"]);
-      if (params.projectId !== undefined)
-        assertId(params.projectId, "projectId");
-      if (params.workspaceId !== undefined)
-        assertId(params.workspaceId, "workspaceId");
+      if (params.projectId !== undefined) assertId(params.projectId, "projectId");
+      if (params.workspaceId !== undefined) assertId(params.workspaceId, "workspaceId");
       assertOptionalBoolean(params.includeCompleted, "includeCompleted");
       return;
     default: {
       const exhaustive: never = method;
-      throw new ProtocolError(
-        `unsupported method: ${String(exhaustive)}`,
-        "method_not_found",
-      );
+      throw new ProtocolError(`unsupported method: ${String(exhaustive)}`, "method_not_found");
     }
   }
 }
 
-export function assertClientEnvelope(
-  value: unknown,
-): asserts value is ClientEnvelope {
+export function assertClientEnvelope(value: unknown): asserts value is ClientEnvelope {
   if (
     isObject(value) &&
     value.type === "request" &&
     typeof value.method === "string" &&
     !hostMethods.has(value.method)
   ) {
-    throw new ProtocolError(
-      `unsupported method: ${value.method}`,
-      "method_not_found",
-    );
+    throw new ProtocolError(`unsupported method: ${value.method}`, "method_not_found");
   }
   if (!clientValidator(value)) {
     throw new ProtocolError(
@@ -295,24 +316,16 @@ export function assertHello(value: unknown): asserts value is HelloEnvelope {
   }
 }
 
-export function assertRequest(
-  value: unknown,
-): asserts value is RequestEnvelope {
+export function assertRequest(value: unknown): asserts value is RequestEnvelope {
   assertClientEnvelope(value);
   if (value.type !== "request") {
-    throw new ProtocolError(
-      "hello is only valid as the first frame",
-      "unexpected_hello",
-      {
-        fatal: true,
-      },
-    );
+    throw new ProtocolError("hello is only valid as the first frame", "unexpected_hello", {
+      fatal: true,
+    });
   }
 }
 
-export function assertServerEnvelope(
-  value: unknown,
-): asserts value is ServerEnvelope {
+export function assertServerEnvelope(value: unknown): asserts value is ServerEnvelope {
   if (!serverValidator(value)) {
     throw new ProtocolError(
       `invalid server envelope: ${validationMessage(serverValidator)}`,

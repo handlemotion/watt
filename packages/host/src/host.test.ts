@@ -1,15 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import {
-  access,
-  link,
-  mkdir,
-  mkdtemp,
-  readFile,
-  realpath,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { access, link, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -143,6 +134,32 @@ function fakeGit(): GitService & { created: string[]; archived: string[] } {
         branchOutcome: input.keepBranch ? "kept" : "deleted",
       };
     },
+    changesets: {
+      async preflight(input) {
+        return {
+          state: "ready",
+          localSha: input.expectedLocalSha,
+          remoteSha: input.expectedRemoteSha ?? "fake-remote-head",
+        };
+      },
+      async apply(input) {
+        return { state: "applied", head: input.remoteSha };
+      },
+      async resolve(input) {
+        return { state: "applied", head: input.remoteSha };
+      },
+      async abort(input) {
+        return { state: "aborted", head: input.expectedLocalSha };
+      },
+    },
+    cloudSeed: {
+      async prepare(input) {
+        return {
+          baseSha: input.expectedLocalSha ?? "fake-local-head",
+          baseRef: input.expectedLocalSha ?? "fake-local-head",
+        };
+      },
+    },
   };
 }
 
@@ -229,8 +246,7 @@ function fakeCodexAgent(): WattAgent & { creates: number } {
             agent.idempotencyKeys.push(options.idempotencyKey);
           }
           return {
-            cursorRunId:
-              options?.idempotencyKey ?? `codex-run-${String(creates)}`,
+            cursorRunId: options?.idempotencyKey ?? `codex-run-${String(creates)}`,
             async *stream() {
               yield { type: "text_delta" as const, text: "codex" };
             },
@@ -252,8 +268,7 @@ type ControlledRun = Awaited<ReturnType<WattAgent["getRun"]>> & {
 };
 
 function controlledAgent(
-  models:
-    ReturnType<typeof fakeModels> | typeof DEFAULT_CODEX_CATALOG = fakeModels(),
+  models: ReturnType<typeof fakeModels> | typeof DEFAULT_CODEX_CATALOG = fakeModels(),
   dispatchGate?: Promise<void>,
 ): WattAgent & {
   starts: Array<{
@@ -303,8 +318,7 @@ function controlledAgent(
           new Promise<void>((done) => {
             const onAbort = () => done();
             options.signal?.addEventListener("abort", onAbort, { once: true });
-            removeAbortListener = () =>
-              options.signal?.removeEventListener("abort", onAbort);
+            removeAbortListener = () => options.signal?.removeEventListener("abort", onAbort);
           }),
         ]);
         removeAbortListener();
@@ -429,10 +443,7 @@ describe("createHost", () => {
     await mkdir(owners, { recursive: true });
     const child = spawn(
       process.execPath,
-      [
-        "-e",
-        "process.stdout.write(String(process.pid)); setInterval(() => {}, 1000)",
-      ],
+      ["-e", "process.stdout.write(String(process.pid)); setInterval(() => {}, 1000)"],
       { stdio: ["ignore", "pipe", "ignore"] },
     );
     const [pidChunk] = (await once(child.stdout!, "data")) as [Buffer];
@@ -443,12 +454,7 @@ describe("createHost", () => {
       const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
       fingerprint = `linux:${fields[19]}`;
     } else {
-      const result = await execFileAsync("ps", [
-        "-o",
-        "lstart=",
-        "-p",
-        String(pid),
-      ]);
+      const result = await execFileAsync("ps", ["-o", "lstart=", "-p", String(pid)]);
       fingerprint = `${process.platform}:${result.stdout.trim()}`;
     }
     const leaseId = "live-sidecar-owner";
@@ -494,17 +500,13 @@ describe("createHost", () => {
     `);
     migrate(database);
     expect(database.pragma("user_version", { simple: true })).toBe(5);
-    expect(
-      database
-        .prepare("SELECT runtime FROM sessions WHERE id = 'session'")
-        .get(),
-    ).toEqual({ runtime: "cursor-local" });
+    expect(database.prepare("SELECT runtime FROM sessions WHERE id = 'session'").get()).toEqual({
+      runtime: "cursor-local",
+    });
     expect(database.pragma("journal_mode", { simple: true })).toBe("wal");
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(database.pragma("busy_timeout", { simple: true })).toBe(5000);
-    const workspaceIndexes = database.pragma(
-      "index_list(workspaces)",
-    ) as Array<{
+    const workspaceIndexes = database.pragma("index_list(workspaces)") as Array<{
       name: string;
       unique: number;
       partial: number;
@@ -517,9 +519,7 @@ describe("createHost", () => {
       unique: number;
       partial: number;
     }>;
-    const operationIndexes = database.pragma(
-      "index_list(operations)",
-    ) as Array<{
+    const operationIndexes = database.pragma("index_list(operations)") as Array<{
       name: string;
       partial: number;
     }>;
@@ -534,9 +534,7 @@ describe("createHost", () => {
       ]),
     );
     expect(sessionIndexes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: "sessions_workspace_history" }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ name: "sessions_workspace_history" })]),
     );
     expect(runIndexes).toEqual(
       expect.arrayContaining([
@@ -566,16 +564,12 @@ describe("createHost", () => {
         )
         .run(),
     ).toThrow();
-    expect(
-      database.prepare("SELECT COUNT(*) AS count FROM workspaces").get(),
-    ).toEqual({ count: 1 });
-    expect(
-      database.prepare("SELECT COUNT(*) AS count FROM sessions").get(),
-    ).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM workspaces").get()).toEqual({
+      count: 1,
+    });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
     const migratedSession = database
-      .prepare(
-        "SELECT model_params_json, execution_policy_json FROM sessions WHERE id = 'session'",
-      )
+      .prepare("SELECT model_params_json, execution_policy_json FROM sessions WHERE id = 'session'")
       .get() as {
       model_params_json: string;
       execution_policy_json: string;
@@ -612,9 +606,9 @@ describe("createHost", () => {
     expect(() => migrate(database)).toThrow(
       "incompatible watt.sqlite: duplicate active worktree_path /tmp/shared",
     );
-    expect(
-      database.prepare("SELECT COUNT(*) AS count FROM workspaces").get(),
-    ).toEqual({ count: 2 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM workspaces").get()).toEqual({
+      count: 2,
+    });
     expect(database.pragma("user_version", { simple: true })).toBe(0);
     database.close();
   });
@@ -636,9 +630,7 @@ describe("createHost", () => {
     migrate(database);
 
     expect(database.pragma("user_version", { simple: true })).toBe(5);
-    expect(
-      database.prepare("SELECT COUNT(*) AS count FROM sessions").get(),
-    ).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
     expect(
       database
         .prepare(
@@ -742,6 +734,51 @@ describe("createHost", () => {
     await host2.close();
   });
 
+  it("serializes concurrent idempotent session creation before agent side effects", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-idempotency-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const agent = fakeAgent();
+    let releaseCreate!: () => void;
+    const createGate = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const originalCreate = agent.create;
+    const create = vi.spyOn(agent, "create").mockImplementation(async (input) => {
+      await createGate;
+      return originalCreate(input);
+    });
+    const host = await createHost({
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent,
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "idempotent-session",
+    });
+    const input = {
+      workspaceId: workspace.id,
+      prompt: "same prompt",
+      idempotencyKey: "session-key-12345678",
+    };
+
+    const first = host.sessions.create(input);
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+    const second = host.sessions.create(input);
+    expect(create).toHaveBeenCalledOnce();
+
+    releaseCreate();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(secondResult).toEqual(firstResult);
+    expect(create).toHaveBeenCalledOnce();
+    expect(host.sessions.list({ workspaceId: workspace.id })).toHaveLength(1);
+    await host.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
   it("rejects path-escaping slugs and retries archive against git", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "watt-host-"));
     const repo = path.join(root, "repo");
@@ -818,9 +855,7 @@ describe("createHost", () => {
       slug: "diagnostics",
     });
 
-    expect(host.diagnostics.operations.list({ projectId: project.id })).toEqual(
-      [],
-    );
+    expect(host.diagnostics.operations.list({ projectId: project.id })).toEqual([]);
     const completed = host.diagnostics.operations.list({
       projectId: project.id,
       includeCompleted: true,
@@ -832,21 +867,17 @@ describe("createHost", () => {
       phase: "operation_completed",
       terminalOutcome: "succeeded",
     });
-    expect(
-      host.diagnostics.operations.get({ operationId: completed[0]!.id }),
-    ).toEqual(completed[0]);
+    expect(host.diagnostics.operations.get({ operationId: completed[0]!.id })).toEqual(
+      completed[0],
+    );
     expect(git.created).toHaveLength(1);
-    expect(host.workspaces.list({ projectId: project.id })).toEqual([
-      workspace,
-    ]);
+    expect(host.workspaces.list({ projectId: project.id })).toEqual([workspace]);
     expect(git.created).toHaveLength(1);
     await host.close();
   });
 
   it("recovers rewound create and archive phases idempotently on startup", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "watt-host-operation-recovery-"),
-    );
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-operation-recovery-"));
     const repo = await initGitRepo(root);
     const stateDir = path.join(root, "state");
     const worktreeRoot = path.join(root, "trees");
@@ -879,9 +910,7 @@ describe("createHost", () => {
         phase === "git_worktree_created" ||
         phase === "path_verified"
       ) {
-        database
-          .prepare("DELETE FROM workspaces WHERE id = ?")
-          .run(workspace.id);
+        database.prepare("DELETE FROM workspaces WHERE id = ?").run(workspace.id);
       }
       database
         .prepare(
@@ -894,9 +923,7 @@ describe("createHost", () => {
       expect(host.workspaces.get(workspace.id)).toMatchObject({
         archivedAt: null,
       });
-      expect(
-        host.diagnostics.operations.get({ operationId: createOperation.id }),
-      ).toMatchObject({
+      expect(host.diagnostics.operations.get({ operationId: createOperation.id })).toMatchObject({
         phase: "operation_completed",
         terminalOutcome: "succeeded",
         recoveryAttemptCount: index + 1,
@@ -918,9 +945,7 @@ describe("createHost", () => {
     for (const [index, phase] of archivePhases.entries()) {
       const database = new Database(path.join(stateDir, "watt.sqlite"));
       if (phase !== "workspace_archived") {
-        database
-          .prepare("UPDATE workspaces SET archived_at = NULL WHERE id = ?")
-          .run(workspace.id);
+        database.prepare("UPDATE workspaces SET archived_at = NULL WHERE id = ?").run(workspace.id);
       }
       database
         .prepare(
@@ -933,9 +958,7 @@ describe("createHost", () => {
       expect(host.workspaces.get(workspace.id)).toMatchObject({
         archivedAt: expect.any(Number),
       });
-      expect(
-        host.diagnostics.operations.get({ operationId: archiveOperation.id }),
-      ).toMatchObject({
+      expect(host.diagnostics.operations.get({ operationId: archiveOperation.id })).toMatchObject({
         phase: "workspace_archived",
         terminalOutcome: "succeeded",
         recoveryAttemptCount: index + 1,
@@ -943,17 +966,16 @@ describe("createHost", () => {
       await host.close();
     }
     host = await createHost({ stateDir, worktreeRoot, git, agent });
-    expect(
-      host.diagnostics.operations.get({ operationId: archiveOperation.id }),
-    ).toMatchObject({ recoveryAttemptCount: 5, terminalOutcome: "succeeded" });
+    expect(host.diagnostics.operations.get({ operationId: archiveOperation.id })).toMatchObject({
+      recoveryAttemptCount: 5,
+      terminalOutcome: "succeeded",
+    });
     await host.close();
     await rm(root, { recursive: true, force: true });
   });
 
   it("marks mismatched recovery as needs_attention without deleting Git state", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "watt-host-operation-attention-"),
-    );
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-operation-attention-"));
     const repo = await initGitRepo(root);
     const stateDir = path.join(root, "state");
     const worktreeRoot = path.join(root, "trees");
@@ -970,11 +992,7 @@ describe("createHost", () => {
       includeCompleted: true,
     })[0]!;
     await host.close();
-    await gitCommand(workspace.worktreePath, [
-      "switch",
-      "-c",
-      "manual/attention",
-    ]);
+    await gitCommand(workspace.worktreePath, ["switch", "-c", "manual/attention"]);
 
     const database = new Database(path.join(stateDir, "watt.sqlite"));
     database.pragma("foreign_keys = ON");
@@ -987,9 +1005,7 @@ describe("createHost", () => {
     database.close();
 
     host = await createHost({ stateDir, worktreeRoot, git, agent });
-    expect(
-      host.diagnostics.operations.get({ operationId: operation.id }),
-    ).toMatchObject({
+    expect(host.diagnostics.operations.get({ operationId: operation.id })).toMatchObject({
       terminalOutcome: "needs_attention",
       compensationOutcome: "unsafe",
     });
@@ -1003,9 +1019,7 @@ describe("createHost", () => {
   });
 
   it("revalidates Git identity after a persisted path_verified create phase", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "watt-host-path-verified-drift-"),
-    );
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-path-verified-drift-"));
     const repo = await initGitRepo(root);
     const stateDir = path.join(root, "state");
     const worktreeRoot = path.join(root, "trees");
@@ -1023,11 +1037,7 @@ describe("createHost", () => {
     })[0]!;
     await host.close();
 
-    await gitCommand(workspace.worktreePath, [
-      "switch",
-      "-c",
-      "manual/path-verified-drift",
-    ]);
+    await gitCommand(workspace.worktreePath, ["switch", "-c", "manual/path-verified-drift"]);
     const database = new Database(path.join(stateDir, "watt.sqlite"));
     database.pragma("foreign_keys = ON");
     database.prepare("DELETE FROM workspaces WHERE id = ?").run(workspace.id);
@@ -1040,9 +1050,7 @@ describe("createHost", () => {
 
     host = await createHost({ stateDir, worktreeRoot, git, agent });
     expect(host.workspaces.get(workspace.id)).toBeUndefined();
-    expect(
-      host.diagnostics.operations.get({ operationId: operation.id }),
-    ).toMatchObject({
+    expect(host.diagnostics.operations.get({ operationId: operation.id })).toMatchObject({
       terminalOutcome: "needs_attention",
       compensationOutcome: "unsafe",
       diagnostic: { code: "worktree_mismatch" },
@@ -1093,10 +1101,7 @@ describe("createHost", () => {
     const firstAttachment = collect(first.run.id);
     const secondAttachment = collect(first.run.id);
     agent.starts[0]?.run.finish();
-    const [firstEvents, duplicateEvents] = await Promise.all([
-      firstAttachment,
-      secondAttachment,
-    ]);
+    const [firstEvents, duplicateEvents] = await Promise.all([firstAttachment, secondAttachment]);
     expect(firstEvents).toEqual(duplicateEvents);
     expect(firstEvents).toMatchObject([
       {
@@ -1121,9 +1126,9 @@ describe("createHost", () => {
     });
     expect(agent.starts).toHaveLength(2);
     agent.starts[1]?.run.finish();
-    await expect(
-      host.runs.wait({ runId: second.run.id }),
-    ).resolves.toMatchObject({ status: "finished" });
+    await expect(host.runs.wait({ runId: second.run.id })).resolves.toMatchObject({
+      status: "finished",
+    });
     await host.close();
   });
 
@@ -1163,9 +1168,7 @@ describe("createHost", () => {
     await expect(pending).resolves.toEqual({ done: true, value: undefined });
     expect(host.runs.get(created.run.id)?.status).toBe("running");
     agent.starts[0]?.run.finish();
-    await expect(
-      host.runs.wait({ runId: created.run.id }),
-    ).resolves.toMatchObject({
+    await expect(host.runs.wait({ runId: created.run.id })).resolves.toMatchObject({
       status: "finished",
     });
     await host.close();
@@ -1193,9 +1196,7 @@ describe("createHost", () => {
       host.sessions.create({ workspaceId: workspace.id, prompt: "two" }),
     ]);
     await vi.waitFor(() => expect(agent.starts).toHaveLength(2));
-    expect(new Set(agent.starts.map((start) => start.prompt))).toEqual(
-      new Set(["one", "two"]),
-    );
+    expect(new Set(agent.starts.map((start) => start.prompt))).toEqual(new Set(["one", "two"]));
     for (const start of agent.starts) start.run.finish();
     await Promise.all([
       host.runs.wait({ runId: first.run.id }),
@@ -1228,9 +1229,9 @@ describe("createHost", () => {
       prompt: "queued",
     });
 
-    const queuedWait = expect(
-      host.runs.wait({ runId: queued.run.id }),
-    ).rejects.toMatchObject({ code: "host_closed" });
+    const queuedWait = expect(host.runs.wait({ runId: queued.run.id })).rejects.toMatchObject({
+      code: "host_closed",
+    });
     const close = host.close();
     expect(host.close()).toBe(close);
     await Promise.all([close, queuedWait]);
@@ -1244,17 +1245,15 @@ describe("createHost", () => {
     await vi.waitFor(() => expect(agent.starts).toHaveLength(2));
     expect(agent.starts[1]?.prompt).toBe("queued");
     agent.starts[1]?.run.finish();
-    await expect(
-      reopened.runs.wait({ runId: queued.run.id }),
-    ).resolves.toMatchObject({ status: "finished" });
+    await expect(reopened.runs.wait({ runId: queued.run.id })).resolves.toMatchObject({
+      status: "finished",
+    });
     await reopened.close();
   });
 
   it("suspends and recovers an active Cursor run without cancelling it", async () => {
     const runtime = "cursor-local" as const;
-    const root = await mkdtemp(
-      path.join(tmpdir(), `watt-host-suspend-${runtime}-`),
-    );
+    const root = await mkdtemp(path.join(tmpdir(), `watt-host-suspend-${runtime}-`));
     const repo = path.join(root, "repo");
     await mkdir(repo);
     const stateDir = path.join(root, "state");
@@ -1295,9 +1294,9 @@ describe("createHost", () => {
     await vi.waitFor(() => expect(activeAgent.recovered).toHaveLength(1));
     expect(reopened.runs.get(created.run.id)?.status).toBe("running");
     activeAgent.starts[0]?.run.finish();
-    await expect(
-      reopened.runs.wait({ runId: created.run.id }),
-    ).resolves.toMatchObject({ status: "finished" });
+    await expect(reopened.runs.wait({ runId: created.run.id })).resolves.toMatchObject({
+      status: "finished",
+    });
     expect(activeAgent.cancelled).toEqual([]);
     await reopened.close();
   });
@@ -1379,9 +1378,10 @@ describe("createHost", () => {
     database.close();
 
     const recovered = await createHost({ stateDir, worktreeRoot, git, agent });
-    await expect(
-      recovered.runs.wait({ runId: created.run.id }),
-    ).resolves.toMatchObject({ status: "finished", result: "recover-me-done" });
+    await expect(recovered.runs.wait({ runId: created.run.id })).resolves.toMatchObject({
+      status: "finished",
+      result: "recover-me-done",
+    });
     expect(agent.recovered).toEqual([agent.starts[0]?.run.cursorRunId]);
     const replayed = [];
     for await (const event of recovered.runs.attach({
@@ -1404,9 +1404,10 @@ describe("createHost", () => {
     await vi.waitFor(() => expect(agent.starts).toHaveLength(2));
     expect(agent.starts[1]?.idempotencyKey).toBe(created.run.id);
     agent.starts[1]?.run.finish();
-    await expect(
-      retried.runs.wait({ runId: created.run.id }),
-    ).resolves.toMatchObject({ status: "finished", result: "retry-me-done" });
+    await expect(retried.runs.wait({ runId: created.run.id })).resolves.toMatchObject({
+      status: "finished",
+      result: "retry-me-done",
+    });
     await retried.close();
   });
 
@@ -1485,23 +1486,12 @@ describe("createHost", () => {
     await host.workspaces.archive({ workspaceId: archived.id });
     inspections = 0;
 
-    await gitCommand(mismatched.worktreePath, [
-      "switch",
-      "-c",
-      "manual/mismatched",
-    ]);
+    await gitCommand(mismatched.worktreePath, ["switch", "-c", "manual/mismatched"]);
     await rm(deleted.worktreePath, { recursive: true, force: true });
     const movedPath = path.join(root, "manually-moved");
     await gitCommand(repo, ["worktree", "move", moved.worktreePath, movedPath]);
     const untrackedPath = path.join(root, "manual-untracked");
-    await gitCommand(repo, [
-      "worktree",
-      "add",
-      "-b",
-      "manual/untracked",
-      untrackedPath,
-      "HEAD",
-    ]);
+    await gitCommand(repo, ["worktree", "add", "-b", "manual/untracked", untrackedPath, "HEAD"]);
     const canonicalMovedPath = await realpath(movedPath);
     const canonicalUntrackedPath = await realpath(untrackedPath);
 
@@ -1551,13 +1541,9 @@ describe("createHost", () => {
       ]),
     );
     expect(
-      report.entries.some(
-        (entry) => "workspace" in entry && entry.workspace?.id === archived.id,
-      ),
+      report.entries.some((entry) => "workspace" in entry && entry.workspace?.id === archived.id),
     ).toBe(false);
-    expect(host.workspaces.list({ projectId: project.id })).toEqual(
-      cachedBefore,
-    );
+    expect(host.workspaces.list({ projectId: project.id })).toEqual(cachedBefore);
     expect(inspections).toBe(setupInspections + 2);
     await host.close();
     await rm(root, { recursive: true, force: true });
@@ -1574,9 +1560,7 @@ describe("createHost", () => {
     });
     const project = await host.projects.register(repo);
     await rm(repo, { recursive: true, force: true });
-    await expect(
-      host.projects.reconcile({ projectId: project.id }),
-    ).resolves.toMatchObject({
+    await expect(host.projects.reconcile({ projectId: project.id })).resolves.toMatchObject({
       repositoryIdentity: null,
       entries: [
         {
@@ -1693,9 +1677,9 @@ describe("createHost", () => {
       description: "duplicate",
       execute: () => "ok",
     };
-    await expect(
-      createHost({ ...base, customTools: [tool, tool] }),
-    ).rejects.toMatchObject({ code: "invalid_options" });
+    await expect(createHost({ ...base, customTools: [tool, tool] })).rejects.toMatchObject({
+      code: "invalid_options",
+    });
     await expect(
       createHost({
         ...base,
@@ -1802,9 +1786,7 @@ describe("createHost", () => {
     });
     await cachedHost.close();
 
-    const emptyRoot = await mkdtemp(
-      path.join(tmpdir(), "watt-host-no-catalog-"),
-    );
+    const emptyRoot = await mkdtemp(path.join(tmpdir(), "watt-host-no-catalog-"));
     const unavailable = await createHost({
       stateDir: path.join(emptyRoot, "state"),
       worktreeRoot: path.join(emptyRoot, "trees"),
@@ -1936,9 +1918,7 @@ describe("createHost", () => {
       },
     ]);
     const reopened = await createHost(options);
-    await expect(
-      reopened.runs.wait({ runId: queued.run.id }),
-    ).resolves.toMatchObject({
+    await expect(reopened.runs.wait({ runId: queued.run.id })).resolves.toMatchObject({
       status: "error",
       error: { code: "model_unavailable" },
     });
@@ -1966,14 +1946,10 @@ describe("createHost", () => {
       "cursor-local",
       "codex-local",
     ]);
-    expect(
-      capabilities.runtimes.find((runtime) => runtime.id === "codex-local"),
-    ).toMatchObject({
+    expect(capabilities.runtimes.find((runtime) => runtime.id === "codex-local")).toMatchObject({
       modes: ["agent"],
       executionPolicy: { controls: ["sandbox"] },
-      models: expect.arrayContaining([
-        expect.objectContaining({ id: "codex:gpt-5.5" }),
-      ]),
+      models: expect.arrayContaining([expect.objectContaining({ id: "codex:gpt-5.5" })]),
     });
     const project = await host.projects.register(repo);
     const workspace = await host.workspaces.create({
@@ -2002,9 +1978,7 @@ describe("createHost", () => {
     });
     expect(cursorCreate).not.toHaveBeenCalled();
     expect(createSpy).toHaveBeenCalledOnce();
-    await expect(
-      host.runs.wait({ runId: created.run.id }),
-    ).resolves.toMatchObject({
+    await expect(host.runs.wait({ runId: created.run.id })).resolves.toMatchObject({
       status: "finished",
       result: "codex-result",
     });
@@ -2061,9 +2035,7 @@ describe("createHost", () => {
   });
 
   it("fails Codex sessions with codex_auth_unavailable when startThread fails", async () => {
-    const root = await mkdtemp(
-      path.join(tmpdir(), "watt-host-codex-create-auth-"),
-    );
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-codex-create-auth-"));
     const repo = path.join(root, "repo");
     await mkdir(repo);
     const cursor = fakeAgent();
@@ -2095,6 +2067,100 @@ describe("createHost", () => {
       code: "codex_auth_unavailable",
     });
     await host.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("replays changeset pulls durably and refuses integration while a workspace is busy", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-changeset-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const git = fakeGit();
+    const preflight = vi.spyOn(git.changesets, "preflight");
+    const agent = controlledAgent();
+    const host = await createHost({
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git,
+      agent,
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "changeset",
+    });
+    const input = {
+      changesetId: "changeset-12345678",
+      workspaceId: workspace.id,
+      remote: "origin",
+      branch: "watt/cloud/chat",
+      expectedLocalSha: "a".repeat(40),
+      expectedRemoteSha: "b".repeat(40),
+      idempotencyKey: "pull-12345678",
+    };
+
+    const first = await host.changesets.pull(input);
+    await expect(host.changesets.pull(input)).resolves.toEqual(first);
+    expect(preflight).toHaveBeenCalledTimes(1);
+    await expect(
+      host.changesets.pull({ ...input, branch: "watt/cloud/other" }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+
+    await host.sessions.create({
+      workspaceId: workspace.id,
+      prompt: "stay active",
+    });
+    await vi.waitFor(() => expect(agent.starts).toHaveLength(1));
+    await expect(
+      host.changesets.pull({
+        ...input,
+        idempotencyKey: "pull-busy-12345678",
+      }),
+    ).rejects.toMatchObject({ code: "workspace_busy" });
+    await host.close();
+  });
+
+  it("bounds the idempotency key used for conflict resolvers", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-resolver-key-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const git = fakeGit();
+    vi.spyOn(git.changesets, "resolve").mockResolvedValue({
+      state: "resolving",
+      head: "b".repeat(40),
+    });
+    const host = await createHost({
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git,
+      agent: fakeAgent(),
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "resolver-key",
+    });
+
+    await expect(
+      host.changesets.resolve({
+        changesetId: "changeset-12345678",
+        workspaceId: workspace.id,
+        remote: "origin",
+        branch: "watt/cloud/chat",
+        expectedLocalSha: "a".repeat(40),
+        expectedRemoteSha: "b".repeat(40),
+        remoteSha: "b".repeat(40),
+        idempotencyKey: "r".repeat(200),
+      }),
+    ).resolves.toMatchObject({ state: "resolving" });
+
+    await host.close();
+    const database = new Database(path.join(root, "state", "watt.sqlite"));
+    const replay = database
+      .prepare("SELECT idempotency_key FROM mutation_replays WHERE operation = 'sessions.create'")
+      .get() as { idempotency_key: string } | undefined;
+    expect(replay?.idempotency_key).toHaveLength(200);
+    expect(replay?.idempotency_key.endsWith(":resolver")).toBe(true);
+    database.close();
     await rm(root, { recursive: true, force: true });
   });
 });

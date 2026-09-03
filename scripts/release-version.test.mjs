@@ -8,14 +8,9 @@ import { evaluateReleaseGate, pendingChangesetFiles } from "./release-gate.mjs";
 import { syncReleaseVersion } from "./sync-release-version.mjs";
 
 test("pendingChangesetFiles ignores config and README", () => {
-  assert.deepEqual(
-    pendingChangesetFiles([
-      "config.json",
-      "README.md",
-      "curly-wolves-remain.md",
-    ]),
-    ["curly-wolves-remain.md"],
-  );
+  assert.deepEqual(pendingChangesetFiles(["config.json", "README.md", "curly-wolves-remain.md"]), [
+    "curly-wolves-remain.md",
+  ]);
 });
 
 test("release gate packages only a version bump without leftover changesets", () => {
@@ -102,28 +97,17 @@ test("syncReleaseVersion copies the product version into root and Cargo manifest
   );
 
   assert.equal(syncReleaseVersion(repo), "0.2.0");
+  assert.equal(JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8")).version, "0.2.0");
   assert.equal(
-    JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8")).version,
-    "0.2.0",
-  );
-  assert.equal(
-    JSON.parse(
-      readFileSync(path.join(repo, "apps", "desktop", "package.json"), "utf8"),
-    ).version,
+    JSON.parse(readFileSync(path.join(repo, "apps", "desktop", "package.json"), "utf8")).version,
     "0.2.0",
   );
   assert.match(
-    readFileSync(
-      path.join(repo, "apps", "desktop", "src-tauri", "Cargo.toml"),
-      "utf8",
-    ),
+    readFileSync(path.join(repo, "apps", "desktop", "src-tauri", "Cargo.toml"), "utf8"),
     /name = "watt-desktop"\nversion = "0.2.0"/,
   );
   assert.match(
-    readFileSync(
-      path.join(repo, "apps", "desktop", "src-tauri", "Cargo.lock"),
-      "utf8",
-    ),
+    readFileSync(path.join(repo, "apps", "desktop", "src-tauri", "Cargo.lock"), "utf8"),
     /name = "watt-desktop"\nversion = "0.2.0"/,
   );
 });

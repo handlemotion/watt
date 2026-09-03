@@ -66,6 +66,8 @@ No GitHub Actions secrets are required. The workflow's `id-token: write` permiss
 
    ```sh
    pnpm install --frozen-lockfile
+   pnpm lint
+   pnpm format:check
    pnpm check
    pnpm check:rust
    pnpm desktop:sidecar
@@ -79,6 +81,9 @@ No GitHub Actions secrets are required. The workflow's `id-token: write` permiss
    ```
 
 The workflow repeats all checks from a frozen install before requesting credentials, fetches the Apple values from Infisical through OIDC, imports the certificate into a temporary keychain, builds the Tauri executable, packages and signs the app explicitly, runs the packaged Tauri-to-Host lifecycle probe, notarizes and staples the app and DMG, produces `Watt-vX.Y.Z-aarch64.dmg` plus its SHA-256 checksum, records a GitHub artifact attestation, creates `vX.Y.Z` if needed, and publishes a draft release only after every acceptance check succeeds.
+`pnpm check` repeats the Oxlint and Oxfmt gates before the type, protocol, test, and build checks.
+
+3. Merge the version change to `main`, then create and push the exact tag from that commit:
 
 Pushing an unpublished `vMAJOR.MINOR.PATCH` tag remains a recovery path if the `main` packaging job did not run.
 

@@ -1,13 +1,19 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "apps/cloud"
 allowBuilds:
   "@central-icons-svelte/round-outlined-radius-2-stroke-1.5": true
+  "@prisma/client": true
   better-sqlite3: true
   esbuild: true
+  protobufjs: true
+  sharp: true
+  workerd: true
 
 minimumReleaseAgeExclude:
   - "@tauri-apps/plugin-clipboard-manager@2.3.3"
 
 overrides:
+  "@esbuild-kit/core-utils>esbuild": 0.25.0
   undici: 6.28.0

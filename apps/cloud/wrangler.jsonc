@@ -1,0 +1,81 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "watt-cloud-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CLOUD_HOST_COORDINATOR",
+        "class_name": "CloudHostCoordinator",
+      },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CloudHostCoordinator"] }],
+  "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "00000000000000000000000000000000" }],
+  "vars": {
+    "ENVIRONMENT": "development",
+    "ALLOWED_GITHUB_OWNER_ID": "configure-with-immutable-github-owner-id",
+    "CLOUD_DAEMON_PORT": "8788",
+    "CLOUD_DAEMON_TARBALL_URL": "https://github.com/handlemotion/watt/releases/download/configure/Watt-cloud-daemon-configure-linux-x64.tar.gz",
+    "CLOUD_DAEMON_TARBALL_SHA256": "configure-with-immutable-daemon-tarball-sha256",
+    "CLOUD_DAEMON_CONFIG_VERSION": "configure-daemon-config-version",
+    "AUTH_LOGIN_URL": "https://configure.example.com/auth/login",
+    "AUTH_CONSENT_URL": "https://configure.example.com/auth/consent",
+    "NATIVE_REDIRECT_URI": "http://127.0.0.1:49152/oauth/callback",
+  },
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 },
+  },
+  "env": {
+    "staging": {
+      "name": "watt-cloud-api-staging",
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "CLOUD_HOST_COORDINATOR",
+            "class_name": "CloudHostCoordinator",
+          },
+        ],
+      },
+      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "00000000000000000000000000000000" }],
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "ALLOWED_GITHUB_OWNER_ID": "configure-with-immutable-github-owner-id",
+        "CLOUD_DAEMON_PORT": "8788",
+        "CLOUD_DAEMON_TARBALL_URL": "https://github.com/handlemotion/watt/releases/download/configure/Watt-cloud-daemon-configure-linux-x64.tar.gz",
+        "CLOUD_DAEMON_TARBALL_SHA256": "configure-with-immutable-daemon-tarball-sha256",
+        "CLOUD_DAEMON_CONFIG_VERSION": "configure-daemon-config-version",
+        "AUTH_LOGIN_URL": "https://configure.example.com/auth/login",
+        "AUTH_CONSENT_URL": "https://configure.example.com/auth/consent",
+        "NATIVE_REDIRECT_URI": "http://127.0.0.1:49152/oauth/callback",
+      },
+    },
+    "production": {
+      "name": "watt-cloud-api-production",
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "CLOUD_HOST_COORDINATOR",
+            "class_name": "CloudHostCoordinator",
+          },
+        ],
+      },
+      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "00000000000000000000000000000000" }],
+      "vars": {
+        "ENVIRONMENT": "production",
+        "ALLOWED_GITHUB_OWNER_ID": "configure-with-immutable-github-owner-id",
+        "CLOUD_DAEMON_PORT": "8788",
+        "CLOUD_DAEMON_TARBALL_URL": "https://github.com/handlemotion/watt/releases/download/configure/Watt-cloud-daemon-configure-linux-x64.tar.gz",
+        "CLOUD_DAEMON_TARBALL_SHA256": "configure-with-immutable-daemon-tarball-sha256",
+        "CLOUD_DAEMON_CONFIG_VERSION": "configure-daemon-config-version",
+        "AUTH_LOGIN_URL": "https://configure.example.com/auth/login",
+        "AUTH_CONSENT_URL": "https://configure.example.com/auth/consent",
+        "NATIVE_REDIRECT_URI": "http://127.0.0.1:49152/oauth/callback",
+      },
+    },
+  },
+}

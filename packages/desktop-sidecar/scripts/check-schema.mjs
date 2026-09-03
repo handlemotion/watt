@@ -2,12 +2,8 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 const packageRoot = new URL("../", import.meta.url);
-const schemaBytes = await readFile(
-  new URL("protocol.schema.json", packageRoot),
-);
-const expected = (
-  await readFile(new URL("protocol.schema.sha256", packageRoot), "utf8")
-).trim();
+const schemaBytes = await readFile(new URL("protocol.schema.json", packageRoot));
+const expected = (await readFile(new URL("protocol.schema.sha256", packageRoot), "utf8")).trim();
 const actual = createHash("sha256").update(schemaBytes).digest("hex");
 
 if (actual !== expected) {

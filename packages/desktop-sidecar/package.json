@@ -2,44 +2,45 @@
   "name": "@watt/desktop-sidecar",
   "version": "0.0.1",
   "private": true,
-  "type": "module",
-  "main": "./dist/index.js",
   "bin": {
     "watt-desktop-sidecar": "./dist/cli.js"
   },
+  "files": [
+    "dist",
+    "protocol.schema.json"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist",
-    "protocol.schema.json"
-  ],
-  "pkg": {
-    "assets": [
-      "protocol.schema.json"
-    ]
-  },
   "scripts": {
     "build": "tsc",
     "check-types": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run src",
     "protocol:check": "node scripts/check-schema.mjs"
   },
   "dependencies": {
     "@watt/host": "workspace:*",
+    "@watt/host-protocol": "workspace:*",
     "ajv": "^8.17.1",
     "ulid": "^3.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
     "@watt/typescript-config": "workspace:*",
-    "typescript": "5.9.2",
-    "vitest": "3.2.4"
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
   },
   "engines": {
     "node": ">=22.13.0"
+  },
+  "pkg": {
+    "assets": [
+      "protocol.schema.json"
+    ]
   }
 }

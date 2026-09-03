@@ -1,11 +1,4 @@
-import {
-  access,
-  mkdir,
-  readFile,
-  realpath,
-  rename,
-  writeFile,
-} from "node:fs/promises";
+import { access, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import pLimit from "p-limit";
@@ -26,6 +19,10 @@ import { runSetupCommand } from "./setup.js";
 import { defaultGitSpawn } from "./spawn.js";
 import type {
   ArchiveWorktreeInput,
+  CloudSeedInput,
+  CloudSeedResult,
+  ChangesetIntegrationInput,
+  ChangesetPreflightResult,
   CreateGitOptions,
   CreateWorktreeInput,
   CreatedWorktree,
@@ -70,8 +67,7 @@ function isOperationMarker(value: unknown): value is OperationMarker {
   return (
     marker.schemaVersion === 1 &&
     typeof marker.operationId === "string" &&
-    (marker.type === "create_workspace" ||
-      marker.type === "archive_workspace") &&
+    (marker.type === "create_workspace" || marker.type === "archive_workspace") &&
     typeof marker.repositoryIdentity === "string" &&
     typeof marker.worktreePath === "string" &&
     typeof marker.branch === "string" &&
@@ -127,12 +123,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
   }> {
     const requestedRoot = await resolveRepoRoot(repoRoot);
     const result = await git(
-      [
-        "rev-parse",
-        "--path-format=absolute",
-        "--git-common-dir",
-        "--show-toplevel",
-      ],
+      ["rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"],
       requestedRoot,
     );
     const [commonDirectory, topLevel] = result.stdout.split("\n");
@@ -145,19 +136,13 @@ export function createGit(options: CreateGitOptions = {}): GitService {
         repositoryIdentity: await realpath(commonDirectory),
       };
     } catch (cause) {
-      throw new GitError(
-        "could not canonicalize repository identity",
-        "git_failed",
-        {
-          cause,
-        },
-      );
+      throw new GitError("could not canonicalize repository identity", "git_failed", {
+        cause,
+      });
     }
   }
 
-  async function listWorktreesUnlocked(
-    repoRoot: string,
-  ): Promise<GitWorktree[]> {
+  async function listWorktreesUnlocked(repoRoot: string): Promise<GitWorktree[]> {
     const result = await git(["worktree", "list", "--porcelain"], repoRoot);
     return Promise.all(
       parseWorktreePorcelain(result.stdout).map(async (worktree) => {
@@ -178,9 +163,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
     );
   }
 
-  async function inspectRepository(
-    repoRoot: string,
-  ): Promise<RepositorySnapshot> {
+  async function inspectRepository(repoRoot: string): Promise<RepositorySnapshot> {
     const repository = await resolveRepository(repoRoot);
     return {
       ...repository,
@@ -189,15 +172,9 @@ export function createGit(options: CreateGitOptions = {}): GitService {
     };
   }
 
-  async function branchExists(
-    repoRoot: string,
-    branch: string,
-  ): Promise<boolean> {
+  async function branchExists(repoRoot: string, branch: string): Promise<boolean> {
     try {
-      await git(
-        ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
-        repoRoot,
-      );
+      await git(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], repoRoot);
       return true;
     } catch (error) {
       if (error instanceof GitError && error.code === "git_failed") {
@@ -207,10 +184,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
     }
   }
 
-  async function branchHead(
-    repoRoot: string,
-    branch: string,
-  ): Promise<string | null> {
+  async function branchHead(repoRoot: string, branch: string): Promise<string | null> {
     try {
       const result = await git(
         ["rev-parse", "--verify", `refs/heads/${branch}^{commit}`],
@@ -227,11 +201,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
     if (!OPERATION_ID.test(operationId)) {
       throw new GitError("invalid workspace operation ID", "invalid_options");
     }
-    return path.join(
-      repositoryIdentity,
-      "watt-operations",
-      `${operationId}.json`,
-    );
+    return path.join(repositoryIdentity, "watt-operations", `${operationId}.json`);
   }
 
   async function readMarker(
@@ -284,10 +254,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
     if (input.baseRef.startsWith("-")) {
       throw new GitError(`invalid baseRef: ${input.baseRef}`, "invalid_ref");
     }
-    const resolved = await git(
-      ["rev-parse", "--verify", `${input.baseRef}^{commit}`],
-      repoRoot,
-    );
+    const resolved = await git(["rev-parse", "--verify", `${input.baseRef}^{commit}`], repoRoot);
     const expectedHead = resolved.stdout.trim();
     if (!expectedHead) {
       throw new GitError("could not resolve baseRef", "git_failed");
@@ -306,10 +273,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
     assertCopyGlobs(config.copy);
     const expectedHead = await validateCreateInput(repoRoot, input);
     if (await branchExists(repoRoot, input.branch)) {
-      throw new GitError(
-        `branch already exists: ${input.branch}`,
-        "branch_exists",
-      );
+      throw new GitError(`branch already exists: ${input.branch}`, "branch_exists");
     }
     let marker = existingMarker;
     if (input.operationId) {
@@ -325,10 +289,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
       };
       await writeMarker(marker);
     }
-    await git(
-      ["worktree", "add", "-b", input.branch, worktreePath, input.baseRef],
-      repoRoot,
-    );
+    await git(["worktree", "add", "-b", input.branch, worktreePath, input.baseRef], repoRoot);
     try {
       const copied = await copyGlobs(repoRoot, worktreePath, config.copy);
       let setupRan = false;
@@ -338,9 +299,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
         try {
           for (const command of config.commands) {
             await runSetupCommand(
-              command.cursorScript
-                ? path.join(worktreePath, command.command)
-                : command.command,
+              command.cursorScript ? path.join(worktreePath, command.command) : command.command,
               {
                 cwd: worktreePath,
                 timeoutMs: SETUP_TIMEOUT_MS,
@@ -391,10 +350,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
 
   function needsAttention(
     repositoryIdentity: string,
-    reason: Extract<
-      WorkspaceOperationStepResult,
-      { state: "needs_attention" }
-    >["reason"],
+    reason: Extract<WorkspaceOperationStepResult, { state: "needs_attention" }>["reason"],
     observed?: Readonly<Record<string, unknown>>,
   ): WorkspaceOperationStepResult {
     const result: WorkspaceOperationStepResult = {
@@ -427,76 +383,41 @@ export function createGit(options: CreateGitOptions = {}): GitService {
     worktreePath: string,
   ): Promise<WorkspaceOperationStepResult> {
     const repoRoot = repository.repoRoot;
-    let marker = await readMarker(
-      repository.repositoryIdentity,
-      input.operationId,
-    );
+    let marker = await readMarker(repository.repositoryIdentity, input.operationId);
     if (marker === "invalid") {
-      return needsAttention(
-        repository.repositoryIdentity,
-        "operation_marker_invalid",
-      );
+      return needsAttention(repository.repositoryIdentity, "operation_marker_invalid");
     }
     const listed = await listWorktreesUnlocked(repoRoot);
-    const exact = listed.filter(
-      (row) => path.resolve(row.path) === path.resolve(worktreePath),
-    );
+    const exact = listed.filter((row) => path.resolve(row.path) === path.resolve(worktreePath));
     if (exact.length > 1) {
-      return needsAttention(
-        repository.repositoryIdentity,
-        "duplicate_canonical_path",
-        { count: exact.length, worktreePath },
-      );
+      return needsAttention(repository.repositoryIdentity, "duplicate_canonical_path", {
+        count: exact.length,
+        worktreePath,
+      });
     }
 
     if (input.type === "create_workspace") {
       if (!marker) {
         const branch = await branchHead(repoRoot, input.branch);
-        if (
-          exact.length > 0 ||
-          branch !== null ||
-          (await targetExists(worktreePath))
-        ) {
-          return needsAttention(
-            repository.repositoryIdentity,
-            "operation_marker_missing",
-            {
-              branchExists: branch !== null,
-              pathExists: await targetExists(worktreePath),
-            },
-          );
+        if (exact.length > 0 || branch !== null || (await targetExists(worktreePath))) {
+          return needsAttention(repository.repositoryIdentity, "operation_marker_missing", {
+            branchExists: branch !== null,
+            pathExists: await targetExists(worktreePath),
+          });
         }
         await createWorktreeUnlocked(
           repository,
           { ...input, operationId: input.operationId },
           worktreePath,
         );
-        marker = await readMarker(
-          repository.repositoryIdentity,
-          input.operationId,
-        );
-      } else if (
-        !markerMatches(
-          marker,
-          input,
-          repository.repositoryIdentity,
-          worktreePath,
-        )
-      ) {
-        return needsAttention(
-          repository.repositoryIdentity,
-          "operation_identity_mismatch",
-        );
+        marker = await readMarker(repository.repositoryIdentity, input.operationId);
+      } else if (!markerMatches(marker, input, repository.repositoryIdentity, worktreePath)) {
+        return needsAttention(repository.repositoryIdentity, "operation_identity_mismatch");
       } else if (marker.phase === "intent_recorded") {
-        if (
-          exact.length > 0 ||
-          (await branchHead(repoRoot, input.branch)) !== null
-        ) {
-          return needsAttention(
-            repository.repositoryIdentity,
-            "worktree_mismatch",
-            { markerPhase: marker.phase },
-          );
+        if (exact.length > 0 || (await branchHead(repoRoot, input.branch)) !== null) {
+          return needsAttention(repository.repositoryIdentity, "worktree_mismatch", {
+            markerPhase: marker.phase,
+          });
         }
         await createWorktreeUnlocked(
           repository,
@@ -504,16 +425,10 @@ export function createGit(options: CreateGitOptions = {}): GitService {
           worktreePath,
           marker,
         );
-        marker = await readMarker(
-          repository.repositoryIdentity,
-          input.operationId,
-        );
+        marker = await readMarker(repository.repositoryIdentity, input.operationId);
       }
       if (!marker || marker === "invalid") {
-        return needsAttention(
-          repository.repositoryIdentity,
-          "operation_marker_missing",
-        );
+        return needsAttention(repository.repositoryIdentity, "operation_marker_missing");
       }
       if (input.target === "create_compensated") {
         if (marker.phase === "create_compensated") {
@@ -525,11 +440,9 @@ export function createGit(options: CreateGitOptions = {}): GitService {
           };
         }
         if (marker.phase !== "git_worktree_created") {
-          return needsAttention(
-            repository.repositoryIdentity,
-            "operation_identity_mismatch",
-            { markerPhase: marker.phase },
-          );
+          return needsAttention(repository.repositoryIdentity, "operation_identity_mismatch", {
+            markerPhase: marker.phase,
+          });
         }
         const current = (await listWorktreesUnlocked(repoRoot)).filter(
           (row) => path.resolve(row.path) === path.resolve(worktreePath),
@@ -537,9 +450,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
         if (current.length !== 1) {
           return needsAttention(
             repository.repositoryIdentity,
-            current.length > 1
-              ? "duplicate_canonical_path"
-              : "worktree_missing",
+            current.length > 1 ? "duplicate_canonical_path" : "worktree_missing",
           );
         }
         const worktree = current[0];
@@ -550,31 +461,19 @@ export function createGit(options: CreateGitOptions = {}): GitService {
           worktree.branch !== input.branch ||
           worktree.head !== marker.expectedHead
         ) {
-          return needsAttention(
-            repository.repositoryIdentity,
-            "worktree_mismatch",
-          );
+          return needsAttention(repository.repositoryIdentity, "worktree_mismatch");
         }
         await git(["worktree", "remove", "--force", worktreePath], repoRoot);
         const currentHead = await branchHead(repoRoot, input.branch);
         if (currentHead !== null) {
-          if (
-            marker.expectedHead === null ||
-            currentHead !== marker.expectedHead
-          ) {
-            return needsAttention(
-              repository.repositoryIdentity,
-              "branch_changed",
-              { expectedHead: marker.expectedHead, currentHead },
-            );
+          if (marker.expectedHead === null || currentHead !== marker.expectedHead) {
+            return needsAttention(repository.repositoryIdentity, "branch_changed", {
+              expectedHead: marker.expectedHead,
+              currentHead,
+            });
           }
           await git(
-            [
-              "update-ref",
-              "-d",
-              `refs/heads/${input.branch}`,
-              marker.expectedHead,
-            ],
+            ["update-ref", "-d", `refs/heads/${input.branch}`, marker.expectedHead],
             repoRoot,
           );
         }
@@ -587,11 +486,9 @@ export function createGit(options: CreateGitOptions = {}): GitService {
         };
       }
       if (marker.phase !== "git_worktree_created") {
-        return needsAttention(
-          repository.repositoryIdentity,
-          "operation_identity_mismatch",
-          { markerPhase: marker.phase },
-        );
+        return needsAttention(repository.repositoryIdentity, "operation_identity_mismatch", {
+          markerPhase: marker.phase,
+        });
       }
       const current = (await listWorktreesUnlocked(repoRoot)).filter(
         (row) => path.resolve(row.path) === path.resolve(worktreePath),
@@ -604,31 +501,21 @@ export function createGit(options: CreateGitOptions = {}): GitService {
       }
       const worktree = current[0];
       if (!worktree) {
-        return needsAttention(
-          repository.repositoryIdentity,
-          "worktree_missing",
-        );
+        return needsAttention(repository.repositoryIdentity, "worktree_missing");
       }
       if (worktree.bare) {
-        return needsAttention(
-          repository.repositoryIdentity,
-          "unsupported_bare_worktree",
-        );
+        return needsAttention(repository.repositoryIdentity, "unsupported_bare_worktree");
       }
       if (
         !worktree.pathExists ||
         worktree.branch !== input.branch ||
         worktree.head !== marker.expectedHead
       ) {
-        return needsAttention(
-          repository.repositoryIdentity,
-          "worktree_mismatch",
-          {
-            pathExists: worktree.pathExists,
-            branch: worktree.branch,
-            head: worktree.head,
-          },
-        );
+        return needsAttention(repository.repositoryIdentity, "worktree_mismatch", {
+          pathExists: worktree.pathExists,
+          branch: worktree.branch,
+          head: worktree.head,
+        });
       }
       return {
         state: "advanced",
@@ -641,23 +528,15 @@ export function createGit(options: CreateGitOptions = {}): GitService {
     if (!marker) {
       const worktree = exact[0];
       if (worktree?.bare) {
-        return needsAttention(
-          repository.repositoryIdentity,
-          "unsupported_bare_worktree",
-        );
+        return needsAttention(repository.repositoryIdentity, "unsupported_bare_worktree");
       }
-      if (
-        worktree &&
-        (!worktree.pathExists || worktree.branch !== input.branch)
-      ) {
-        return needsAttention(
-          repository.repositoryIdentity,
-          "worktree_mismatch",
-          { pathExists: worktree.pathExists, branch: worktree.branch },
-        );
+      if (worktree && (!worktree.pathExists || worktree.branch !== input.branch)) {
+        return needsAttention(repository.repositoryIdentity, "worktree_mismatch", {
+          pathExists: worktree.pathExists,
+          branch: worktree.branch,
+        });
       }
-      const observedHead =
-        worktree?.head ?? (await branchHead(repoRoot, input.branch));
+      const observedHead = worktree?.head ?? (await branchHead(repoRoot, input.branch));
       if (
         input.expectedHead !== undefined &&
         input.expectedHead !== null &&
@@ -669,12 +548,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
           currentHead: observedHead,
         });
       }
-      if (
-        input.expectedHead === null &&
-        !worktree &&
-        !input.keepBranch &&
-        observedHead !== null
-      ) {
+      if (input.expectedHead === null && !worktree && !input.keepBranch && observedHead !== null) {
         return needsAttention(repository.repositoryIdentity, "branch_changed", {
           expectedHead: input.expectedHead,
           currentHead: observedHead,
@@ -696,20 +570,12 @@ export function createGit(options: CreateGitOptions = {}): GitService {
         phase: "intent_recorded",
       };
       await writeMarker(marker);
-    } else if (
-      !markerMatches(marker, input, repository.repositoryIdentity, worktreePath)
-    ) {
-      return needsAttention(
-        repository.repositoryIdentity,
-        "operation_identity_mismatch",
-      );
+    } else if (!markerMatches(marker, input, repository.repositoryIdentity, worktreePath)) {
+      return needsAttention(repository.repositoryIdentity, "operation_identity_mismatch");
     }
 
     if (input.target === "git_worktree_removed") {
-      if (
-        marker.phase === "git_worktree_removed" ||
-        marker.phase === "branch_outcome_recorded"
-      ) {
+      if (marker.phase === "git_worktree_removed" || marker.phase === "branch_outcome_recorded") {
         return {
           state: "advanced",
           repositoryIdentity: repository.repositoryIdentity,
@@ -723,8 +589,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
           worktree.bare ||
           !worktree.pathExists ||
           worktree.branch !== input.branch ||
-          (marker.expectedHead !== null &&
-            worktree.head !== marker.expectedHead)
+          (marker.expectedHead !== null && worktree.head !== marker.expectedHead)
         ) {
           return needsAttention(
             repository.repositoryIdentity,
@@ -734,11 +599,9 @@ export function createGit(options: CreateGitOptions = {}): GitService {
         }
         await git(["worktree", "remove", "--force", worktreePath], repoRoot);
       } else if (await targetExists(worktreePath)) {
-        return needsAttention(
-          repository.repositoryIdentity,
-          "path_exists_outside_snapshot",
-          { worktreePath },
-        );
+        return needsAttention(repository.repositoryIdentity, "path_exists_outside_snapshot", {
+          worktreePath,
+        });
       }
       marker = { ...marker, phase: "git_worktree_removed" };
       await writeMarker(marker);
@@ -750,15 +613,10 @@ export function createGit(options: CreateGitOptions = {}): GitService {
       };
     }
 
-    if (
-      marker.phase !== "git_worktree_removed" &&
-      marker.phase !== "branch_outcome_recorded"
-    ) {
-      return needsAttention(
-        repository.repositoryIdentity,
-        "operation_identity_mismatch",
-        { markerPhase: marker.phase },
-      );
+    if (marker.phase !== "git_worktree_removed" && marker.phase !== "branch_outcome_recorded") {
+      return needsAttention(repository.repositoryIdentity, "operation_identity_mismatch", {
+        markerPhase: marker.phase,
+      });
     }
     if (marker.phase === "branch_outcome_recorded" && marker.branchOutcome) {
       return {
@@ -775,19 +633,13 @@ export function createGit(options: CreateGitOptions = {}): GitService {
       branchOutcome = currentHead === null ? "already_absent" : "kept";
     } else if (currentHead === null) {
       branchOutcome = "already_absent";
-    } else if (
-      marker.expectedHead === null ||
-      currentHead !== marker.expectedHead
-    ) {
+    } else if (marker.expectedHead === null || currentHead !== marker.expectedHead) {
       return needsAttention(repository.repositoryIdentity, "branch_changed", {
         expectedHead: marker.expectedHead,
         currentHead,
       });
     } else {
-      await git(
-        ["update-ref", "-d", `refs/heads/${input.branch}`, marker.expectedHead],
-        repoRoot,
-      );
+      await git(["update-ref", "-d", `refs/heads/${input.branch}`, marker.expectedHead], repoRoot);
       branchOutcome = "deleted";
     }
     marker = {
@@ -813,25 +665,388 @@ export function createGit(options: CreateGitOptions = {}): GitService {
       assertAbsolutePath("worktreePath", input.worktreePath),
     );
     if (isPathInside(repository.repoRoot, worktreePath)) {
-      throw new GitError(
-        "worktreePath must not be inside the source repo",
-        "nested_worktree",
-      );
+      throw new GitError("worktreePath must not be inside the source repo", "nested_worktree");
     }
     return locks.run(repository.repositoryIdentity, () =>
       leases.run(
         repository.repositoryIdentity,
         "recover_workspace_operation",
-        () =>
-          advanceWorkspaceOperationUnlocked(repository, input, worktreePath),
+        () => advanceWorkspaceOperationUnlocked(repository, input, worktreePath),
         input.operationId,
       ),
+    );
+  }
+
+  function assertChangesetId(id: string): void {
+    if (!/^[A-Za-z0-9-]{8,100}$/.test(id)) {
+      throw new GitError("invalid changeset ID", "invalid_options");
+    }
+  }
+
+  function assertRemote(remote: string): void {
+    if (
+      !remote ||
+      remote.startsWith("-") ||
+      remote.includes("\0") ||
+      remote.includes("\r") ||
+      remote.includes("\n")
+    ) {
+      throw new GitError("invalid Git remote", "invalid_options");
+    }
+  }
+
+  async function changesetPreflight(
+    input: ChangesetIntegrationInput,
+  ): Promise<ChangesetPreflightResult> {
+    assertRemote(input.remote);
+    assertChangesetId(input.id);
+    const repository = await resolveRepository(input.repoRoot);
+    return locks.run(repository.repositoryIdentity, () =>
+      leases.run(repository.repositoryIdentity, "integrate_changeset", async () => {
+        const worktreePath = await realpath(input.worktreePath);
+        const status = await git(
+          ["status", "--porcelain=v1", "--untracked-files=all"],
+          worktreePath,
+        );
+        if (status.stdout.trim()) {
+          throw new GitError("local workspace is dirty", "local_workspace_dirty");
+        }
+        const localSha = (await git(["rev-parse", "HEAD"], worktreePath)).stdout.trim();
+        if (localSha !== input.expectedLocalSha) {
+          const recovered = await recoverAppliedChangeset(
+            repository.repositoryIdentity,
+            input,
+            worktreePath,
+            localSha,
+          );
+          if (recovered) return recovered;
+          return { state: "advanced_local", actualLocalSha: localSha };
+        }
+        const integrationRef = `refs/watt/changesets/${input.id}`;
+        await git(
+          ["fetch", "--no-tags", input.remote, `refs/heads/${input.branch}:${integrationRef}`],
+          worktreePath,
+        );
+        const remoteSha = (await git(["rev-parse", integrationRef], worktreePath)).stdout.trim();
+        if (input.expectedRemoteSha && remoteSha !== input.expectedRemoteSha) {
+          throw new GitError("cloud branch changed", "needs_attention");
+        }
+        await writeChangesetJournal(repository.repositoryIdentity, input.id, {
+          phase: "preflight",
+          localSha,
+          remoteSha,
+          worktreePath,
+          at: Date.now(),
+        });
+        try {
+          await git(["merge-tree", "--write-tree", localSha, remoteSha], worktreePath);
+          return { state: "ready", localSha, remoteSha };
+        } catch (error) {
+          if (error instanceof GitError && error.code === "git_failed") {
+            return { state: "conflicted", localSha, remoteSha };
+          }
+          throw error;
+        }
+      }),
+    );
+  }
+
+  async function writeChangesetJournal(
+    repositoryIdentity: string,
+    id: string,
+    value: unknown,
+  ): Promise<void> {
+    const directory = path.join(repositoryIdentity, "watt-changesets");
+    await mkdir(directory, { recursive: true });
+    const target = path.join(directory, `${id}.json`);
+    const temporary = `${target}.${process.pid}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    await rename(temporary, target);
+  }
+
+  async function readChangesetJournal(
+    repositoryIdentity: string,
+    id: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    try {
+      const value: unknown = JSON.parse(
+        await readFile(path.join(repositoryIdentity, "watt-changesets", `${id}.json`), "utf8"),
+      );
+      return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async function recoverAppliedChangeset(
+    repositoryIdentity: string,
+    input: ChangesetIntegrationInput,
+    worktreePath: string,
+    head: string,
+  ): Promise<Extract<ChangesetPreflightResult, { state: "already_applied" }> | undefined> {
+    const journal = await readChangesetJournal(repositoryIdentity, input.id);
+    if (
+      !journal ||
+      !["apply_started", "resolving", "applied"].includes(
+        typeof journal.phase === "string" ? journal.phase : "",
+      ) ||
+      journal.localSha !== input.expectedLocalSha ||
+      typeof journal.remoteSha !== "string" ||
+      (input.expectedRemoteSha !== undefined && journal.remoteSha !== input.expectedRemoteSha)
+    ) {
+      return undefined;
+    }
+    if (
+      typeof journal.worktreePath === "string" &&
+      (await realpath(journal.worktreePath).catch(() => undefined)) !== worktreePath
+    ) {
+      return undefined;
+    }
+    const status = await git(["status", "--porcelain=v1", "--untracked-files=all"], worktreePath);
+    if (status.stdout.trim()) return undefined;
+    const remoteSha = journal.remoteSha;
+    const localMergeBase = (
+      await git(["merge-base", input.expectedLocalSha, head], worktreePath)
+    ).stdout.trim();
+    const remoteMergeBase = (
+      await git(["merge-base", remoteSha, head], worktreePath)
+    ).stdout.trim();
+    if (localMergeBase !== input.expectedLocalSha || remoteMergeBase !== remoteSha) {
+      return undefined;
+    }
+    if (journal.phase !== "applied" || journal.head !== head) {
+      await writeChangesetJournal(repositoryIdentity, input.id, {
+        phase: "applied",
+        localSha: input.expectedLocalSha,
+        remoteSha,
+        head,
+        worktreePath,
+        at: Date.now(),
+      });
+    }
+    return {
+      state: "already_applied",
+      localSha: input.expectedLocalSha,
+      remoteSha,
+      head,
+    };
+  }
+
+  async function applyChangeset(
+    input: ChangesetIntegrationInput & { remoteSha: string },
+  ): Promise<{ state: "applied" | "conflicted"; head: string }> {
+    assertChangesetId(input.id);
+    const repository = await resolveRepository(input.repoRoot);
+    return locks.run(repository.repositoryIdentity, () =>
+      leases.run(repository.repositoryIdentity, "integrate_changeset", async () => {
+        const worktreePath = await realpath(input.worktreePath);
+        const status = await git(
+          ["status", "--porcelain=v1", "--untracked-files=all"],
+          worktreePath,
+        );
+        if (status.stdout.trim())
+          throw new GitError("local workspace is dirty", "local_workspace_dirty");
+        const localSha = (await git(["rev-parse", "HEAD"], worktreePath)).stdout.trim();
+        if (localSha !== input.expectedLocalSha)
+          throw new GitError("local HEAD advanced", "needs_attention");
+        try {
+          await git(["merge-tree", "--write-tree", localSha, input.remoteSha], worktreePath);
+        } catch (error) {
+          if (error instanceof GitError && error.code === "git_failed")
+            return { state: "conflicted", head: localSha };
+          throw error;
+        }
+        await writeChangesetJournal(repository.repositoryIdentity, input.id, {
+          phase: "apply_started",
+          localSha,
+          remoteSha: input.remoteSha,
+          worktreePath,
+          at: Date.now(),
+        });
+        try {
+          await git(["merge", "--no-edit", "--no-ff", input.remoteSha], worktreePath);
+        } catch {
+          await git(["merge", "--abort"], worktreePath).catch(() => undefined);
+          return { state: "conflicted", head: input.expectedLocalSha };
+        }
+        const head = (await git(["rev-parse", "HEAD"], worktreePath)).stdout.trim();
+        await writeChangesetJournal(repository.repositoryIdentity, input.id, {
+          phase: "applied",
+          localSha: input.expectedLocalSha,
+          remoteSha: input.remoteSha,
+          head,
+          worktreePath,
+          at: Date.now(),
+        });
+        return { state: "applied", head };
+      }),
+    );
+  }
+
+  async function resolveChangeset(
+    input: ChangesetIntegrationInput & { remoteSha: string },
+  ): Promise<{ state: "resolving" | "applied"; head: string }> {
+    assertChangesetId(input.id);
+    const repository = await resolveRepository(input.repoRoot);
+    return locks.run(repository.repositoryIdentity, () =>
+      leases.run(repository.repositoryIdentity, "integrate_changeset", async () => {
+        const worktreePath = await realpath(input.worktreePath);
+        const status = await git(
+          ["status", "--porcelain=v1", "--untracked-files=all"],
+          worktreePath,
+        );
+        if (status.stdout.trim()) {
+          const journal = await readChangesetJournal(repository.repositoryIdentity, input.id);
+          if (
+            journal?.phase === "resolving" &&
+            journal.localSha === input.expectedLocalSha &&
+            journal.remoteSha === input.remoteSha &&
+            typeof journal.worktreePath === "string" &&
+            (await realpath(journal.worktreePath).catch(() => undefined)) === worktreePath
+          ) {
+            return { state: "resolving", head: input.expectedLocalSha };
+          }
+          throw new GitError("local workspace is dirty", "local_workspace_dirty");
+        }
+        const head = (await git(["rev-parse", "HEAD"], worktreePath)).stdout.trim();
+        if (head !== input.expectedLocalSha) {
+          const recovered = await recoverAppliedChangeset(
+            repository.repositoryIdentity,
+            input,
+            worktreePath,
+            head,
+          );
+          if (recovered) return { state: "applied", head: recovered.head };
+          throw new GitError("local HEAD advanced", "needs_attention");
+        }
+        await writeChangesetJournal(repository.repositoryIdentity, input.id, {
+          phase: "resolve_started",
+          localSha: head,
+          remoteSha: input.remoteSha,
+          worktreePath,
+          at: Date.now(),
+        });
+        try {
+          await git(["merge", "--no-commit", "--no-ff", input.remoteSha], worktreePath);
+          await git(["commit", "--no-edit"], worktreePath);
+          const applied = (await git(["rev-parse", "HEAD"], worktreePath)).stdout.trim();
+          await writeChangesetJournal(repository.repositoryIdentity, input.id, {
+            phase: "applied",
+            localSha: input.expectedLocalSha,
+            remoteSha: input.remoteSha,
+            head: applied,
+            worktreePath,
+            at: Date.now(),
+          });
+          return { state: "applied", head: applied };
+        } catch (error) {
+          if (!(error instanceof GitError) || error.code !== "git_failed") {
+            throw error;
+          }
+          await writeChangesetJournal(repository.repositoryIdentity, input.id, {
+            phase: "resolving",
+            localSha: head,
+            remoteSha: input.remoteSha,
+            worktreePath,
+            at: Date.now(),
+          });
+          return { state: "resolving", head };
+        }
+      }),
+    );
+  }
+
+  async function abortChangeset(
+    input: Pick<ChangesetIntegrationInput, "id" | "repoRoot" | "worktreePath" | "expectedLocalSha">,
+  ): Promise<{ state: "aborted"; head: string }> {
+    assertChangesetId(input.id);
+    const repository = await resolveRepository(input.repoRoot);
+    return locks.run(repository.repositoryIdentity, () =>
+      leases.run(repository.repositoryIdentity, "integrate_changeset", async () => {
+        const worktreePath = await realpath(input.worktreePath);
+        const journal = await readChangesetJournal(repository.repositoryIdentity, input.id);
+        const status = await git(
+          ["status", "--porcelain=v1", "--untracked-files=all"],
+          worktreePath,
+        );
+        const currentHead = (await git(["rev-parse", "HEAD"], worktreePath)).stdout.trim();
+        if (
+          !status.stdout.trim() &&
+          currentHead === input.expectedLocalSha &&
+          (journal?.phase === "abort_started" || journal?.phase === "aborted")
+        ) {
+          await writeChangesetJournal(repository.repositoryIdentity, input.id, {
+            phase: "aborted",
+            head: currentHead,
+            worktreePath,
+            at: Date.now(),
+          });
+          return { state: "aborted", head: currentHead };
+        }
+        await writeChangesetJournal(repository.repositoryIdentity, input.id, {
+          phase: "abort_started",
+          expectedLocalSha: input.expectedLocalSha,
+          worktreePath,
+          at: Date.now(),
+        });
+        await git(["merge", "--abort"], worktreePath);
+        const head = (await git(["rev-parse", "HEAD"], worktreePath)).stdout.trim();
+        if (head !== input.expectedLocalSha) {
+          throw new GitError("abort did not restore expected HEAD", "needs_attention");
+        }
+        await writeChangesetJournal(repository.repositoryIdentity, input.id, {
+          phase: "aborted",
+          head,
+          worktreePath,
+          at: Date.now(),
+        });
+        return { state: "aborted", head };
+      }),
+    );
+  }
+
+  async function prepareCloudSeed(input: CloudSeedInput): Promise<CloudSeedResult> {
+    const remote = input.remote ?? "origin";
+    assertRemote(remote);
+    assertChangesetId(input.id);
+    const repository = await resolveRepository(input.repoRoot);
+    return locks.run(repository.repositoryIdentity, () =>
+      leases.run(repository.repositoryIdentity, "publish_cloud_seed", async () => {
+        const worktreePath = await realpath(input.worktreePath);
+        const status = await git(
+          ["status", "--porcelain=v1", "--untracked-files=all"],
+          worktreePath,
+        );
+        if (status.stdout.trim()) {
+          throw new GitError("local workspace is dirty", "local_workspace_dirty");
+        }
+        const baseSha = (await git(["rev-parse", "HEAD"], worktreePath)).stdout.trim();
+        if (input.expectedLocalSha && input.expectedLocalSha !== baseSha) {
+          throw new GitError("local HEAD advanced", "needs_attention");
+        }
+        const refs = await git(["ls-remote", remote], worktreePath);
+        if (refs.stdout.split("\n").some((line) => line.split(/\s+/, 1)[0] === baseSha)) {
+          return { baseSha, baseRef: baseSha };
+        }
+        const seedRef = `watt/seed/${input.id}`;
+        await git(["push", remote, `${baseSha}:refs/heads/${seedRef}`], worktreePath);
+        return { baseSha, baseRef: seedRef, seedRef };
+      }),
     );
   }
 
   return {
     inspectRepository,
     advanceWorkspaceOperation,
+    changesets: {
+      preflight: changesetPreflight,
+      apply: applyChangeset,
+      resolve: resolveChangeset,
+      abort: abortChangeset,
+    },
+    cloudSeed: { prepare: prepareCloudSeed },
 
     async listWorktrees(repoRoot) {
       return (await inspectRepository(repoRoot)).worktrees;
@@ -844,10 +1059,7 @@ export function createGit(options: CreateGitOptions = {}): GitService {
         assertAbsolutePath("worktreePath", input.worktreePath),
       );
       if (isPathInside(repoRoot, worktreePath)) {
-        throw new GitError(
-          "worktreePath must not be inside the source repo",
-          "nested_worktree",
-        );
+        throw new GitError("worktreePath must not be inside the source repo", "nested_worktree");
       }
       return locks.run(repository.repositoryIdentity, () =>
         leases.run(
@@ -900,25 +1112,18 @@ export function createGit(options: CreateGitOptions = {}): GitService {
       );
       const keepBranch = input.keepBranch ?? true;
       await locks.run(repository.repositoryIdentity, () =>
-        leases.run(
-          repository.repositoryIdentity,
-          "archive_worktree",
-          async () => {
-            const listed = await listWorktreesUnlocked(repoRoot);
-            const present = listed.some(
-              (row) => path.resolve(row.path) === path.resolve(worktreePath),
-            );
-            if (present) {
-              await git(
-                ["worktree", "remove", "--force", worktreePath],
-                repoRoot,
-              );
-            }
-            if (!keepBranch && (await branchExists(repoRoot, input.branch))) {
-              await git(["branch", "-D", "--", input.branch], repoRoot);
-            }
-          },
-        ),
+        leases.run(repository.repositoryIdentity, "archive_worktree", async () => {
+          const listed = await listWorktreesUnlocked(repoRoot);
+          const present = listed.some(
+            (row) => path.resolve(row.path) === path.resolve(worktreePath),
+          );
+          if (present) {
+            await git(["worktree", "remove", "--force", worktreePath], repoRoot);
+          }
+          if (!keepBranch && (await branchExists(repoRoot, input.branch))) {
+            await git(["branch", "-D", "--", input.branch], repoRoot);
+          }
+        }),
       );
     },
   };

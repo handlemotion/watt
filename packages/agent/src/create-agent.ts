@@ -1,8 +1,4 @@
-import {
-  assertAgentEvent,
-  asAgentEvent,
-  mapUnknownSdkMessage,
-} from "./events.js";
+import { assertAgentEvent, asAgentEvent, mapUnknownSdkMessage } from "./events.js";
 import { normalizeExecutionPolicy } from "./policy.js";
 import { mergeCustomTools } from "./tools.js";
 import {
@@ -60,12 +56,9 @@ function wrapRun(run: CursorRun): WattRun {
             }
             const onAbort = () => resolve("aborted");
             signal.addEventListener("abort", onAbort, { once: true });
-            removeAbortListener = () =>
-              signal.removeEventListener("abort", onAbort);
+            removeAbortListener = () => signal.removeEventListener("abort", onAbort);
           });
-          const item = await Promise.race([next, abort]).finally(
-            removeAbortListener,
-          );
+          const item = await Promise.race([next, abort]).finally(removeAbortListener);
           if (item === "aborted") {
             aborted = true;
             await detach();
@@ -84,8 +77,7 @@ function wrapRun(run: CursorRun): WattRun {
         }
       } catch (error) {
         if (signal?.aborted) return;
-        const message =
-          error instanceof Error ? error.message : "agent stream failed";
+        const message = error instanceof Error ? error.message : "agent stream failed";
         yield assertAgentEvent({ type: "error", message });
       } finally {
         if (!aborted && !signal?.aborted) {

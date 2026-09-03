@@ -21,21 +21,17 @@ for (const packageName of buildPackages) {
 }
 
 function percentile(values, fraction) {
-  const index = Math.min(
-    values.length - 1,
-    Math.ceil(values.length * fraction) - 1,
-  );
+  const index = Math.min(values.length - 1, Math.ceil(values.length * fraction) - 1);
   return [...values].sort((a, b) => a - b)[index];
 }
 
 function sample(target) {
   return new Promise((resolve, reject) => {
     const started = performance.now();
-    const child = spawn(
-      process.execPath,
-      ["scripts/startup-sample.mjs", target],
-      { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const child = spawn(process.execPath, ["scripts/startup-sample.mjs", target], {
+      cwd: root,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => {
@@ -46,8 +42,7 @@ function sample(target) {
     });
     child.on("error", reject);
     child.on("close", (code) => {
-      if (code !== 0)
-        return reject(new Error(`startup sample failed (${code}): ${stderr}`));
+      if (code !== 0) return reject(new Error(`startup sample failed (${code}): ${stderr}`));
       try {
         const inner = JSON.parse(stdout);
         resolve({
@@ -63,8 +58,7 @@ function sample(target) {
 
 for (const target of targets) {
   const results = [];
-  for (let index = 0; index < samples; index += 1)
-    results.push(await sample(target));
+  for (let index = 0; index < samples; index += 1) results.push(await sample(target));
   const elapsed = results.map((result) => result.elapsedMs);
   const rss = results.map((result) => result.rssBytes / (1024 * 1024));
   process.stdout.write(

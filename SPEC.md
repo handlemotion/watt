@@ -1,6 +1,6 @@
 # Watt v1 specification
 
-Cursor-native git worktree host. The Node Host registers repositories, creates/list/archives sibling worktrees, runs Cursor or Codex local agents in a worktree `cwd`, streams typed events, and resumes persisted sessions. The product surface is libraries plus the headless CLI. The Svelte 5 + Tauri 2 application is a static distribution shell only.
+Cursor-native git worktree host. The Node Host registers repositories, creates/list/archives sibling worktrees, runs Cursor or Codex local agents in a worktree `cwd`, streams typed events, and resumes persisted sessions. The product surface is libraries plus the headless CLI. The Svelte 5 + Tauri 2 application is a static distribution shell only. The same Host may run locally or behind the authenticated personal cloud control plane described below.
 
 This file is the source of truth. Packages must match it.
 
@@ -14,10 +14,10 @@ This file is the source of truth. Packages must match it.
 ## Non-goals (v1)
 
 - Host-connected workspace controls, automatic updates, or desktop platforms other than Apple Silicon macOS. The static Svelte/Tauri shell may package the local Host and display product-shaped mock content, but no workspace operation is connected to UI.
-- HTTP, WebSocket, ACP, or any alternate Host backend.
+- HTTP, WebSocket, ACP, or any alternate Host backend for the local product surface.
 - GitHub stacks (`gh stack`), nested worktrees, unarchive.
-- Cloud agents, ACP, Debug mode, Ask mode, or providers other than Cursor local and Codex local.
-- Phone/relay, remote provider plugins, Paseo/Conductor, Transitive-specific D1/Postgres provision.
+- ACP, Debug mode, Ask mode.
+- Phone/relay, multi-provider cloud execution, Paseo/Conductor, Transitive-specific D1/Postgres provision.
 
 ## Runtime
 
@@ -308,7 +308,23 @@ The `apps/desktop` Svelte 5 + Tauri 2 application is named Watt with identifier 
 - The first distribution is an Apple Silicon DMG signed with Developer ID Application credentials, notarized and stapled by Apple, attested by GitHub, and attached to the exact existing Git tag's GitHub Release. Manual DMG upgrades are the only update path in v1.
 - The protected release job obtains Apple credentials from a read-only Infisical machine identity using GitHub OIDC. Apple credentials are never stored in or synchronized to GitHub Secrets, and they are requested only after source validation succeeds.
 - Node, Desktop, and Version Packages dependency installs require the repository `CENTRAL_LICENSE_KEY` secret for the licensed Svelte icon package. Each job must fail before install with a named missing-secret error and must never print the value.
-- HTTP, WebSocket, updater, direct frontend process control outside the typed Rust bridge, and Host-connected workspace product UI remain forbidden.
+- HTTP and SSE are allowed only in the cloud API and cloud daemon. WebSocket, updater, direct frontend process control outside the typed Rust bridge, and Host-connected workspace product UI remain forbidden.
+
+## Personal cloud chats
+
+The optional cloud path keeps the local Host contract intact. `apps/cloud` is a Cloudflare Worker using Hono. It authenticates a single allowlisted GitHub owner, stores auth and routing metadata in PlanetScale Postgres through Hyperdrive, and coordinates exactly one persistent Upstash Box per owner with a SQLite-backed `CloudHostCoordinator` Durable Object. Upstash Box is the only cloud runtime.
+
+Inside the box, `@watt/cloud-daemon` runs unprivileged and wraps `@watt/host`. Each cloud chat owns one project clone, Watt workspace, `watt/cloud/<chat-id>` branch, session, and Cursor local agent. The cloud API reports `executionLocation: "cloud"`; the agent runtime remains `cursor-local`. Watt SQLite in the box is authoritative for projects, workspaces, sessions, runs, and sequenced events. PlanetScale stores Better Auth tables plus GitHub installations, cloud hosts, repositories, cloud chats, changesets, and idempotency records.
+
+The Worker and daemon use authenticated JSON requests. Run attachment is replayable SSE and accepts `Last-Event-ID` or `afterSequence`; bodies are streamed without buffering. Chat create/send and changeset pull/resolve require `Idempotency-Key`. One owner coordinator serializes provision, wake, mutation replay, active-run accounting, and idle pause changes. It heartbeats the box while any run is active, persists an eight-minute idle deadline after the final run becomes terminal, and pauses the box at that deadline. The coordinator is not a second chat database.
+
+GitHub login and selected-repository access use one GitHub App with metadata read and contents read/write only. Better Auth exposes OAuth Provider for the public native client `watt-desktop`, using authorization code + PKCE, a localhost callback, short-lived access tokens, and refresh tokens intended for macOS Keychain. Authorization must compare the authenticated immutable GitHub owner ID with the configured allowlist.
+
+A cloud chat starts from a GitHub ref or exact clean local HEAD. Local Watt may publish an unpushed clean commit to `watt/seed/<id>` and removes the seed only after the cloud branch exists. Dirty local worktrees fail `local_workspace_dirty`. After a mutating cloud run, no file changes produce `no_changes`; a dirty worktree or no branch advance produces `needs_commit` and is not pushed; a valid clean advance is pushed automatically and recorded as `published`.
+
+Changeset states are `no_changes`, `needs_commit`, `published`, `conflicted`, `resolving`, `applied`, and `needs_attention`. Pull requires the exact expected SHAs and a clean, idle local workspace. Conflict preflight leaves the workspace untouched and returns `conflicted`. Resolve applies the conflict and starts a resolver session in that same workspace, preferring `composer-2.5` and otherwise using the workspace model. Active local agents fail `workspace_busy`; the SDK has no safe pause or in-run steering operation. Cloud branches remain until chat archival.
+
+Upstash, Cursor, Better Auth, and GitHub App credentials remain Worker secrets. Box files and PlanetScale must not store them. A root-owned, narrow Git broker injects GitHub credentials only into clone/fetch/push child processes. Bootstrap secrets are removed from the daemon environment before any agent is created. Logs redact prompts, repository credentials, OAuth tokens, and provider secrets.
 
 ### `@watt/cli`
 

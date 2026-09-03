@@ -41,6 +41,8 @@ Watt requires Node.js 22.13+, pnpm 11.22.0, the latest stable Rust toolchain, an
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm lint
+pnpm format:check
 pnpm check
 pnpm check:rust
 pnpm desktop:sidecar
@@ -48,5 +50,6 @@ pnpm desktop:sidecar:smoke
 ```
 
 Dependency installation requires `CENTRAL_LICENSE_KEY` for the licensed Svelte icon package. After install, start the Tauri app with `pnpm desktop`. It builds the sidecar on first run if needed. Desktop views use the existing typed Rust bridge rather than introducing another transport; filesystem paths and executable selection remain native-only capabilities.
+`pnpm lint` runs Oxlint and `pnpm format:check` runs Oxfmt. Use `pnpm lint:fix` for safe lint fixes and `pnpm format` to rewrite supported source and configuration files.
 
 `pnpm desktop:build` produces an ad-hoc-signed Tauri app and DMG on an Apple Silicon Mac, including real packaged Host lifecycle probes. Developer ID signing and notarization happen only in the protected GitHub `release` environment, and only after a Version Packages PR merges. Add a changeset with `pnpm changeset` in any PR that should ship.

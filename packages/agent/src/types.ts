@@ -66,7 +66,12 @@ export type WorkspaceInfo = {
 };
 
 export type JsonValue =
-  string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: JsonValue }
+  | JsonValue[];
 
 export type CustomToolContent =
   | { type: "text"; text: string }

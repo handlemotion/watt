@@ -16,17 +16,7 @@ cpSync(app, path.join(staging, "Watt.app"), { recursive: true });
 symlinkSync("/Applications", path.join(staging, "Applications"));
 const result = spawnSync(
   "hdiutil",
-  [
-    "create",
-    "-volname",
-    "Watt",
-    "-srcfolder",
-    staging,
-    "-ov",
-    "-format",
-    "UDZO",
-    dmg,
-  ],
+  ["create", "-volname", "Watt", "-srcfolder", staging, "-ov", "-format", "UDZO", dmg],
   { stdio: "inherit" },
 );
 if (result.error) throw result.error;

@@ -17,10 +17,7 @@ export function parseSdkStreamMessage(value: unknown): SdkStreamMessage | null {
     return null;
   }
   const type = (value as { type: unknown }).type;
-  if (
-    typeof type !== "string" ||
-    !SDK_TYPES.has(type as SdkStreamMessage["type"])
-  ) {
+  if (typeof type !== "string" || !SDK_TYPES.has(type as SdkStreamMessage["type"])) {
     return null;
   }
   const record = value as Record<string, unknown>;
@@ -32,9 +29,7 @@ export function parseSdkStreamMessage(value: unknown): SdkStreamMessage | null {
     case "tool_call":
       return typeof record.call_id === "string" &&
         typeof record.name === "string" &&
-        (record.status === "running" ||
-          record.status === "completed" ||
-          record.status === "error")
+        (record.status === "running" || record.status === "completed" || record.status === "error")
         ? (value as SdkStreamMessage)
         : null;
     case "status":
@@ -43,19 +38,14 @@ export function parseSdkStreamMessage(value: unknown): SdkStreamMessage | null {
         ? (value as SdkStreamMessage)
         : null;
     case "task":
-      return (record.status === undefined ||
-        typeof record.status === "string") &&
+      return (record.status === undefined || typeof record.status === "string") &&
         (record.text === undefined || typeof record.text === "string")
         ? (value as SdkStreamMessage)
         : null;
     case "thinking":
-      return typeof record.text === "string"
-        ? (value as SdkStreamMessage)
-        : null;
+      return typeof record.text === "string" ? (value as SdkStreamMessage) : null;
     case "request":
-      return typeof record.request_id === "string"
-        ? (value as SdkStreamMessage)
-        : null;
+      return typeof record.request_id === "string" ? (value as SdkStreamMessage) : null;
     case "system":
     case "user":
     case "usage":
@@ -69,9 +59,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function textFromAssistant(
-  message: Extract<SdkStreamMessage, { type: "assistant" }>,
-): string {
+function textFromAssistant(message: Extract<SdkStreamMessage, { type: "assistant" }>): string {
   const content = message.message?.content;
   if (!Array.isArray(content)) {
     return "";
@@ -119,9 +107,7 @@ export function mapSdkMessage(message: SdkStreamMessage): AgentEvent[] {
       ];
     }
     case "status":
-      return [
-        { type: "status", status: message.status, message: message.message },
-      ];
+      return [{ type: "status", status: message.status, message: message.message }];
     case "task":
       return [
         {
@@ -155,12 +141,9 @@ export function asAgentEvent(value: unknown): AgentEvent | null {
   const record = value as Record<string, unknown>;
   switch (record.type) {
     case "text_delta":
-      return typeof record.text === "string"
-        ? { type: "text_delta", text: record.text }
-        : null;
+      return typeof record.text === "string" ? { type: "text_delta", text: record.text } : null;
     case "tool_call":
-      return typeof record.callId === "string" &&
-        typeof record.name === "string"
+      return typeof record.callId === "string" && typeof record.name === "string"
         ? {
             type: "tool_call",
             callId: record.callId,
@@ -186,15 +169,11 @@ export function asAgentEvent(value: unknown): AgentEvent | null {
         ? {
             type: "status",
             status: record.status,
-            ...(typeof record.message === "string"
-              ? { message: record.message }
-              : {}),
+            ...(typeof record.message === "string" ? { message: record.message } : {}),
           }
         : null;
     case "error":
-      return typeof record.message === "string"
-        ? { type: "error", message: record.message }
-        : null;
+      return typeof record.message === "string" ? { type: "error", message: record.message } : null;
     default:
       return null;
   }

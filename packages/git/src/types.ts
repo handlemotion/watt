@@ -37,7 +37,11 @@ export type RepositoryLeaseOwner = {
   leaseId: string;
   repositoryIdentity: string;
   operation:
-    "create_worktree" | "archive_worktree" | "recover_workspace_operation";
+    | "create_worktree"
+    | "archive_worktree"
+    | "recover_workspace_operation"
+    | "integrate_changeset"
+    | "publish_cloud_seed";
   operationId?: string;
   pid: number;
   hostname: string;
@@ -134,7 +138,59 @@ export type GitService = {
   advanceWorkspaceOperation: (
     input: WorkspaceOperationStepInput,
   ) => Promise<WorkspaceOperationStepResult>;
+  changesets: {
+    preflight: (input: ChangesetIntegrationInput) => Promise<ChangesetPreflightResult>;
+    apply: (
+      input: ChangesetIntegrationInput & { remoteSha: string },
+    ) => Promise<{ state: "applied" | "conflicted"; head: string }>;
+    resolve: (
+      input: ChangesetIntegrationInput & { remoteSha: string },
+    ) => Promise<{ state: "resolving" | "applied"; head: string }>;
+    abort: (
+      input: Pick<
+        ChangesetIntegrationInput,
+        "id" | "repoRoot" | "worktreePath" | "expectedLocalSha"
+      >,
+    ) => Promise<{ state: "aborted"; head: string }>;
+  };
+  cloudSeed: {
+    prepare: (input: CloudSeedInput) => Promise<CloudSeedResult>;
+  };
 };
+
+export type CloudSeedInput = {
+  id: string;
+  repoRoot: string;
+  worktreePath: string;
+  remote?: string;
+  expectedLocalSha?: string;
+};
+
+export type CloudSeedResult = {
+  baseSha: string;
+  baseRef: string;
+  seedRef?: string;
+};
+
+export type ChangesetIntegrationInput = {
+  id: string;
+  repoRoot: string;
+  worktreePath: string;
+  remote: string;
+  branch: string;
+  expectedLocalSha: string;
+  expectedRemoteSha?: string;
+};
+export type ChangesetPreflightResult =
+  | { state: "ready"; localSha: string; remoteSha: string }
+  | { state: "conflicted"; localSha: string; remoteSha: string }
+  | {
+      state: "already_applied";
+      localSha: string;
+      remoteSha: string;
+      head: string;
+    }
+  | { state: "advanced_local"; actualLocalSha: string };
 
 export type CreateGitOptions = {
   timeoutMs?: number;

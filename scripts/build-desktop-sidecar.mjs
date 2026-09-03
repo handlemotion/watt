@@ -6,10 +6,7 @@ import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputDir = path.join(root, "apps", "desktop", "src-tauri", "binaries");
-const output = path.join(
-  outputDir,
-  "watt-desktop-sidecar-aarch64-apple-darwin",
-);
+const output = path.join(outputDir, "watt-desktop-sidecar-aarch64-apple-darwin");
 const buildDir = path.join(root, ".context", "desktop-sidecar-build");
 const bundle = path.join(buildDir, "desktop-sidecar.cjs");
 const pkgConfig = path.join(buildDir, "package.json");
@@ -43,9 +40,7 @@ const bundleResult = spawnSync(
 );
 if (bundleResult.error) throw bundleResult.error;
 if (bundleResult.status !== 0) {
-  throw new Error(
-    `desktop sidecar bundling failed with exit ${bundleResult.status}`,
-  );
+  throw new Error(`desktop sidecar bundling failed with exit ${bundleResult.status}`);
 }
 
 copyFileSync(
@@ -76,9 +71,7 @@ const result = spawnSync(
 
 if (result.error) throw result.error;
 if (result.status !== 0) {
-  throw new Error(
-    `desktop sidecar packaging failed with exit ${result.status}`,
-  );
+  throw new Error(`desktop sidecar packaging failed with exit ${result.status}`);
 }
 
 console.log(`Desktop sidecar: ${path.relative(root, output)}`);

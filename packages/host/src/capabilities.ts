@@ -41,13 +41,11 @@ export function parseModelCatalog(value: unknown): ModelCapability[] {
     const id = stringValue(item.id, "model id");
     if (ids.has(id)) throw new Error(`duplicate model id: ${id}`);
     ids.add(id);
-    if (!Array.isArray(item.aliases))
-      throw new Error(`invalid aliases for ${id}`);
+    if (!Array.isArray(item.aliases)) throw new Error(`invalid aliases for ${id}`);
     if (!Array.isArray(item.parameters)) {
       throw new Error(`invalid parameters for ${id}`);
     }
-    if (!Array.isArray(item.variants))
-      throw new Error(`invalid variants for ${id}`);
+    if (!Array.isArray(item.variants)) throw new Error(`invalid variants for ${id}`);
     const model: ModelCapability = {
       id,
       displayName: stringValue(item.displayName, "model display name"),
@@ -59,47 +57,32 @@ export function parseModelCatalog(value: unknown): ModelCapability[] {
         const definition = {
           id: stringValue(parameter.id, "parameter id"),
           values: parameter.values.map((entry) => {
-            if (!isRecord(entry))
-              throw new Error(`invalid parameter value for ${id}`);
+            if (!isRecord(entry)) throw new Error(`invalid parameter value for ${id}`);
             const mapped: { value: string; displayName?: string } = {
               value: stringValue(entry.value, "parameter value"),
             };
-            const displayName = optionalString(
-              entry.displayName,
-              "parameter display name",
-            );
+            const displayName = optionalString(entry.displayName, "parameter display name");
             if (displayName !== undefined) mapped.displayName = displayName;
             return mapped;
           }),
         };
-        const displayName = optionalString(
-          parameter.displayName,
-          "parameter display name",
-        );
-        return displayName === undefined
-          ? definition
-          : { ...definition, displayName };
+        const displayName = optionalString(parameter.displayName, "parameter display name");
+        return displayName === undefined ? definition : { ...definition, displayName };
       }),
       variants: item.variants.map((variant) => {
         if (!isRecord(variant) || !Array.isArray(variant.params)) {
           throw new Error(`invalid variant for ${id}`);
         }
-        if (
-          variant.isDefault !== undefined &&
-          typeof variant.isDefault !== "boolean"
-        ) {
+        if (variant.isDefault !== undefined && typeof variant.isDefault !== "boolean") {
           throw new Error(`invalid default variant marker for ${id}`);
         }
         return {
           params: variant.params.map(parameterValue),
           displayName: stringValue(variant.displayName, "variant display name"),
-          ...(optionalString(variant.description, "variant description") ===
-          undefined
+          ...(optionalString(variant.description, "variant description") === undefined
             ? {}
             : { description: variant.description as string }),
-          ...(variant.isDefault === undefined
-            ? {}
-            : { isDefault: variant.isDefault === true }),
+          ...(variant.isDefault === undefined ? {} : { isDefault: variant.isDefault === true }),
         };
       }),
     };
@@ -114,9 +97,7 @@ export function parseModelCatalog(value: unknown): ModelCapability[] {
       const values = new Set<string>();
       for (const entry of parameter.values) {
         if (values.has(entry.value)) {
-          throw new Error(
-            `duplicate value ${entry.value} for ${id}.${parameter.id}`,
-          );
+          throw new Error(`duplicate value ${entry.value} for ${id}.${parameter.id}`);
         }
         values.add(entry.value);
       }
@@ -136,8 +117,7 @@ export function parseModelCatalog(value: unknown): ModelCapability[] {
 }
 
 export function parseModelParameters(value: unknown): ModelParameterValue[] {
-  if (!Array.isArray(value))
-    throw new Error("invalid persisted model parameters");
+  if (!Array.isArray(value)) throw new Error("invalid persisted model parameters");
   return value.map(parameterValue);
 }
 
@@ -161,12 +141,8 @@ export function parseExecutionPolicy(value: unknown): ExecutionPolicy {
     toolAllowlist:
       value.toolAllowlist === null
         ? null
-        : value.toolAllowlist.map((item) =>
-            stringValue(item, "tool allowlist"),
-          ),
-    toolDenylist: value.toolDenylist.map((item) =>
-      stringValue(item, "tool denylist"),
-    ),
+        : value.toolAllowlist.map((item) => stringValue(item, "tool allowlist")),
+    toolDenylist: value.toolDenylist.map((item) => stringValue(item, "tool denylist")),
     settingSources: value.settingSources.map((item) => {
       if (item !== "project" && item !== "user" && item !== "plugins") {
         throw new Error(`invalid setting source: ${String(item)}`);
@@ -183,10 +159,7 @@ export function resolveModelSelection(
   const preferred =
     requested === undefined
       ? (catalog.find((model) => model.id === "composer-2.5") ?? catalog[0])
-      : catalog.find(
-          (model) =>
-            model.id === requested.id || model.aliases.includes(requested.id),
-        );
+      : catalog.find((model) => model.id === requested.id || model.aliases.includes(requested.id));
   if (!preferred) {
     throw new HostError(
       requested === undefined
@@ -196,9 +169,7 @@ export function resolveModelSelection(
     );
   }
   const params =
-    requested?.params ??
-    preferred.variants.find((variant) => variant.isDefault)?.params ??
-    [];
+    requested?.params ?? preferred.variants.find((variant) => variant.isDefault)?.params ?? [];
   const selected = new Map<string, string>();
   for (const parameter of params) {
     if (selected.has(parameter.id)) {
@@ -207,13 +178,8 @@ export function resolveModelSelection(
         "unsupported_model_parameter",
       );
     }
-    const definition = preferred.parameters.find(
-      (candidate) => candidate.id === parameter.id,
-    );
-    if (
-      !definition ||
-      !definition.values.some((value) => value.value === parameter.value)
-    ) {
+    const definition = preferred.parameters.find((candidate) => candidate.id === parameter.id);
+    if (!definition || !definition.values.some((value) => value.value === parameter.value)) {
       throw new HostError(
         `unsupported model parameter ${parameter.id}=${parameter.value} for ${preferred.id}`,
         "unsupported_model_parameter",
@@ -235,8 +201,7 @@ export function sanitizedCatalogError(error: unknown): {
   code?: string;
 } {
   const mapped = {
-    message:
-      error instanceof Error ? error.message : "Cursor model discovery failed",
+    message: error instanceof Error ? error.message : "Cursor model discovery failed",
   };
   if (
     typeof error === "object" &&

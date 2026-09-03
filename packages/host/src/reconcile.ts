@@ -1,18 +1,9 @@
 import { access } from "node:fs/promises";
 import path from "node:path";
 
-import {
-  isGitError,
-  type GitWorktree,
-  type RepositorySnapshot,
-} from "@watt/git";
+import { isGitError, type GitWorktree, type RepositorySnapshot } from "@watt/git";
 
-import type {
-  Project,
-  ProjectReconciliation,
-  ReconciliationEntry,
-  Workspace,
-} from "./types.js";
+import type { Project, ProjectReconciliation, ReconciliationEntry, Workspace } from "./types.js";
 
 function samePath(left: string, right: string): boolean {
   return path.resolve(left) === path.resolve(right);
@@ -103,8 +94,7 @@ export async function reconcileProject(
 
     const branchMatches = snapshot.worktrees.filter(
       (worktree) =>
-        worktree.branch === workspace.branch &&
-        !samePath(worktree.path, snapshot.repoRoot),
+        worktree.branch === workspace.branch && !samePath(worktree.path, snapshot.repoRoot),
     );
     if (branchMatches.length > 0) {
       for (const worktree of branchMatches) {

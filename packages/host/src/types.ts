@@ -9,7 +9,7 @@ import type {
   ModelSelection,
   WattAgent,
 } from "@watt/agent";
-import type { GitService, GitWorktree } from "@watt/git";
+import type { CloudSeedResult, GitService, GitWorktree } from "@watt/git";
 
 export type Project = { id: string; repoRoot: string };
 export type Workspace = {
@@ -77,8 +77,7 @@ export type HostCapabilities = {
   };
 };
 
-export type RunStatus =
-  "queued" | "running" | "finished" | "error" | "cancelled";
+export type RunStatus = "queued" | "running" | "finished" | "error" | "cancelled";
 export type Run = {
   id: string;
   sessionId: string;
@@ -117,13 +116,15 @@ export type ArchiveWorkspaceOperationPhase =
   | "branch_outcome_recorded"
   | "workspace_archived";
 export type WorkspaceOperationPhase =
-  CreateWorkspaceOperationPhase | ArchiveWorkspaceOperationPhase;
-export type WorkspaceOperationTerminalOutcome =
-  "succeeded" | "failed" | "needs_attention";
+  | CreateWorkspaceOperationPhase
+  | ArchiveWorkspaceOperationPhase;
+export type WorkspaceOperationTerminalOutcome = "succeeded" | "failed" | "needs_attention";
 export type WorkspaceOperationCompensationOutcome =
-  "not_required" | "succeeded" | "failed" | "unsafe";
-export type WorkspaceOperationBranchOutcome =
-  "kept" | "deleted" | "already_absent";
+  | "not_required"
+  | "succeeded"
+  | "failed"
+  | "unsafe";
+export type WorkspaceOperationBranchOutcome = "kept" | "deleted" | "already_absent";
 export type WorkspaceOperationDiagnostic = {
   code: string;
   message: string;
@@ -217,6 +218,31 @@ export type CreateHostOptions = {
   customTools?: CustomTool[];
 };
 
+export type ChangesetIntegrationInput = {
+  changesetId: string;
+  workspaceId: string;
+  remote: string;
+  branch: string;
+  expectedLocalSha: string;
+  expectedRemoteSha?: string;
+  idempotencyKey: string;
+};
+
+export type ChangesetPullResult =
+  | { state: "applied"; localSha: string; remoteSha: string; head: string }
+  | { state: "conflicted"; localSha: string; remoteSha: string }
+  | { state: "needs_attention"; actualLocalSha: string };
+
+export type ChangesetResolveResult =
+  | { state: "applied"; head: string }
+  | {
+      state: "resolving";
+      head: string;
+      resolver: { session: Session; run: Run };
+    };
+
+export type ChangesetAbortResult = { state: "conflicted"; head: string };
+
 export type Host = {
   capabilities: () => Promise<HostCapabilities>;
   close: () => Promise<void>;
@@ -234,15 +260,14 @@ export type Host = {
       branch?: string;
       baseRef?: string;
       copyGlobs?: string[];
+      idempotencyKey?: string;
     }) => Promise<Workspace>;
-    list: (input: {
-      projectId: string;
-      includeArchived?: boolean;
-    }) => Workspace[];
+    list: (input: { projectId: string; includeArchived?: boolean }) => Workspace[];
     get: (id: string) => Workspace | undefined;
     archive: (input: {
       workspaceId: string;
       keepBranch?: boolean;
+      idempotencyKey?: string;
     }) => Promise<Workspace>;
   };
   sessions: {
@@ -253,8 +278,9 @@ export type Host = {
       mode?: AgentMode;
       prompt: string;
       executionPolicy?: ExecutionPolicyInput;
+      idempotencyKey?: string;
     }) => Promise<{ session: Session; run: Run }>;
-    send: (input: { sessionId: string; prompt: string }) => Promise<{
+    send: (input: { sessionId: string; prompt: string; idempotencyKey?: string }) => Promise<{
       session: Session;
       run: Run;
     }>;
@@ -271,6 +297,27 @@ export type Host = {
       afterSequence?: number;
       signal?: AbortSignal;
     }) => AsyncIterable<HostEvent>;
+  };
+  cloud: {
+    prepareBase: (input: {
+      seedId: string;
+      workspaceId: string;
+      remote?: string;
+      expectedLocalSha?: string;
+      idempotencyKey?: string;
+    }) => Promise<CloudSeedResult>;
+  };
+  changesets: {
+    pull: (input: ChangesetIntegrationInput) => Promise<ChangesetPullResult>;
+    resolve: (
+      input: ChangesetIntegrationInput & { remoteSha: string },
+    ) => Promise<ChangesetResolveResult>;
+    abort: (input: {
+      changesetId: string;
+      workspaceId: string;
+      expectedLocalSha: string;
+      idempotencyKey?: string;
+    }) => Promise<ChangesetAbortResult>;
   };
   diagnostics: {
     operations: {

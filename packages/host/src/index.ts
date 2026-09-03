@@ -1,11 +1,10 @@
 export { createHost } from "./create-host.js";
-export {
-  HostError,
-  isHostError,
-  isWattBoundaryError,
-  type WattBoundaryError,
-} from "./errors.js";
+export { HostError, isHostError, isWattBoundaryError, type WattBoundaryError } from "./errors.js";
 export type {
+  ChangesetAbortResult,
+  ChangesetIntegrationInput,
+  ChangesetPullResult,
+  ChangesetResolveResult,
   CreateHostOptions,
   ExecutionPolicyControl,
   Host,

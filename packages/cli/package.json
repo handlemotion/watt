@@ -2,20 +2,20 @@
   "name": "@watt/cli",
   "version": "0.0.1",
   "private": true,
-  "type": "module",
-  "main": "./dist/index.js",
   "bin": {
     "watt": "./dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "build": "tsc",
     "check-types": "tsc --noEmit",
@@ -29,8 +29,8 @@
     "@types/node": "^22.15.0",
     "@watt/typescript-config": "workspace:*",
     "execa": "^9.6.0",
-    "typescript": "5.9.2",
-    "vitest": "3.2.4"
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
   },
   "engines": {
     "node": ">=22.13.0"

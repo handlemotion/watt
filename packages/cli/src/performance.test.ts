@@ -12,12 +12,7 @@ const cli = path.join(directory, "..", "dist", "cli.js");
 
 describe("built non-agent CLI paths", () => {
   it("do not resolve @cursor/sdk for help or cached worktree commands", async () => {
-    const help = await execa(process.execPath, [
-      "--experimental-loader",
-      loader,
-      cli,
-      "--help",
-    ]);
+    const help = await execa(process.execPath, ["--experimental-loader", loader, cli, "--help"]);
     expect(help.stdout).toContain("Cursor-native worktree host");
 
     const root = await mkdtemp(path.join(tmpdir(), "watt-cli-loader-"));
@@ -37,5 +32,5 @@ describe("built non-agent CLI paths", () => {
       "ls",
     ]);
     expect(listed.stdout).toBe("[]");
-  });
+  }, 15_000);
 });

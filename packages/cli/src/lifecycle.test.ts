@@ -56,22 +56,18 @@ describe("CLI host lifetime", () => {
   });
 
   it("rejects a missing required repo before opening the host", async () => {
-    await expect(runCli(["node", "watt", "worktree", "ls"])).rejects.toThrow(
-      "--repo is required",
-    );
+    await expect(runCli(["node", "watt", "worktree", "ls"])).rejects.toThrow("--repo is required");
     expect(mocked.createHost).not.toHaveBeenCalled();
   });
 
   it("suspends the host when project registration fails", async () => {
     const instance = host();
-    vi.mocked(instance.projects.register).mockRejectedValue(
-      new Error("register failed"),
-    );
+    vi.mocked(instance.projects.register).mockRejectedValue(new Error("register failed"));
     mocked.createHost.mockResolvedValue(instance);
 
-    await expect(
-      runCli(["node", "watt", "--repo", "/tmp/repo", "worktree", "ls"]),
-    ).rejects.toThrow("register failed");
+    await expect(runCli(["node", "watt", "--repo", "/tmp/repo", "worktree", "ls"])).rejects.toThrow(
+      "register failed",
+    );
     expect(instance.suspend).toHaveBeenCalledOnce();
     expect(instance.close).not.toHaveBeenCalled();
   });
@@ -87,9 +83,9 @@ describe("CLI host lifetime", () => {
     });
     mocked.createHost.mockResolvedValue(instance);
 
-    await expect(
-      runCli(["node", "watt", "--repo", "/tmp/repo", "worktree", "ls"]),
-    ).rejects.toThrow("list failed");
+    await expect(runCli(["node", "watt", "--repo", "/tmp/repo", "worktree", "ls"])).rejects.toThrow(
+      "list failed",
+    );
     expect(instance.suspend).toHaveBeenCalledOnce();
   });
 
@@ -107,14 +103,7 @@ describe("CLI host lifetime", () => {
     mocked.createHost.mockResolvedValue(instance);
 
     let completed = false;
-    const running = runCli([
-      "node",
-      "watt",
-      "--repo",
-      "/tmp/repo",
-      "worktree",
-      "ls",
-    ]).then(() => {
+    const running = runCli(["node", "watt", "--repo", "/tmp/repo", "worktree", "ls"]).then(() => {
       completed = true;
     });
     await vi.waitFor(() => expect(instance.suspend).toHaveBeenCalledOnce());
@@ -284,9 +273,7 @@ describe("CLI host lifetime", () => {
       .mockReturnValueOnce({ id: "run-1", status: "queued" } as never)
       .mockReturnValueOnce({ id: "run-1", status: "running" } as never);
     mocked.createHost.mockResolvedValue(instance);
-    const output = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation(() => true);
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
     try {
       await runCli([
@@ -300,9 +287,7 @@ describe("CLI host lifetime", () => {
         "go",
         "--detach",
       ]);
-      expect(output).toHaveBeenCalledWith(
-        '{"sessionId":"session-1","runId":"run-1"}\n',
-      );
+      expect(output).toHaveBeenCalledWith('{"sessionId":"session-1","runId":"run-1"}\n');
     } finally {
       output.mockRestore();
     }
@@ -332,9 +317,7 @@ describe("CLI host lifetime", () => {
       },
     });
     mocked.createHost.mockResolvedValue(instance);
-    const output = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation(() => true);
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
     try {
       await expect(
@@ -369,16 +352,7 @@ describe("CLI host lifetime", () => {
     });
     mocked.createHost.mockResolvedValue(instance);
 
-    await runCli([
-      "node",
-      "watt",
-      "run",
-      "attach",
-      "--run",
-      "run-1",
-      "--after-sequence",
-      "7",
-    ]);
+    await runCli(["node", "watt", "run", "attach", "--run", "run-1", "--after-sequence", "7"]);
     await runCli(["node", "watt", "run", "cancel", "--run", "run-2"]);
 
     expect(instance.runs.attach).toHaveBeenCalledWith({
@@ -396,28 +370,12 @@ describe("CLI host lifetime", () => {
     vi.mocked(instance.runs.list).mockReturnValue([]);
     vi.mocked(instance.diagnostics.operations.list).mockReturnValue([]);
     mocked.createHost.mockResolvedValue(instance);
-    const output = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation(() => true);
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
     try {
       await runCli(["node", "watt", "capabilities"]);
-      await runCli([
-        "node",
-        "watt",
-        "project",
-        "reconcile",
-        "--project",
-        "project-1",
-      ]);
-      await runCli([
-        "node",
-        "watt",
-        "agent",
-        "ls",
-        "--workspace",
-        "workspace-1",
-      ]);
+      await runCli(["node", "watt", "project", "reconcile", "--project", "project-1"]);
+      await runCli(["node", "watt", "agent", "ls", "--workspace", "workspace-1"]);
       await runCli(["node", "watt", "run", "ls", "--session", "session-1"]);
       await runCli([
         "node",

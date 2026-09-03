@@ -63,9 +63,7 @@ function tagExists(tag) {
 
 function changedFilesInHead() {
   try {
-    return git(["diff", "--name-only", "-M", "HEAD^", "HEAD"])
-      .split("\n")
-      .filter(Boolean);
+    return git(["diff", "--name-only", "-M", "HEAD^", "HEAD"]).split("\n").filter(Boolean);
   } catch {
     return git(["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"])
       .split("\n")
@@ -84,9 +82,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const version = readProductVersion();
   const decision = evaluateReleaseGate({
     hasChangesets: process.env.HAS_CHANGESETS === "true",
-    pendingChangesets: pendingChangesetFiles(
-      readdirSync(path.join(root, ".changeset")),
-    ),
+    pendingChangesets: pendingChangesetFiles(readdirSync(path.join(root, ".changeset"))),
     tagExists: tagExists(`v${version}`),
     changedFiles: changedFilesInHead(),
     version,

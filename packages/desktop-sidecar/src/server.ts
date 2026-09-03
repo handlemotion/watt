@@ -1,11 +1,7 @@
 import type { Readable, Writable } from "node:stream";
 
-import {
-  createHost,
-  isWattBoundaryError,
-  type Host,
-  type RunResult,
-} from "@watt/host";
+import { createHost, type Host, type RunResult } from "@watt/host";
+import { toWireError } from "@watt/host-protocol";
 
 import {
   CAPABILITIES,
@@ -24,11 +20,7 @@ import type {
   WireError,
 } from "./types.js";
 import { ProtocolError } from "./types.js";
-import {
-  assertHello,
-  assertRequest,
-  assertServerEnvelope,
-} from "./validate.js";
+import { assertHello, assertRequest, assertServerEnvelope } from "./validate.js";
 import { BoundedWriter } from "./writer.js";
 
 export type TransportHost = Pick<
@@ -39,6 +31,8 @@ export type TransportHost = Pick<
   | "projects"
   | "workspaces"
   | "sessions"
+  | "cloud"
+  | "changesets"
   | "diagnostics"
 > & {
   runs: Omit<Host["runs"], "attach"> & {
@@ -50,9 +44,7 @@ export type TransportHost = Pick<
   };
 };
 
-export type HostFactory = (
-  options: HostStartupOptions,
-) => Promise<TransportHost>;
+export type HostFactory = (options: HostStartupOptions) => Promise<TransportHost>;
 
 type Subscription = {
   runId: string;
@@ -68,50 +60,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function safeRequestId(value: unknown): string | undefined {
   if (!isRecord(value) || typeof value.requestId !== "string") return undefined;
-  return /^[0-9A-HJKMNP-TV-Z]{26}$/.test(value.requestId)
-    ? value.requestId
-    : undefined;
-}
-
-function safeDetails(
-  value: unknown,
-): Readonly<Record<string, unknown>> | undefined {
-  if (!isRecord(value)) return undefined;
-  try {
-    const serialized = JSON.stringify(value);
-    if (Buffer.byteLength(serialized) > 16 * 1024) return undefined;
-    return JSON.parse(serialized) as Readonly<Record<string, unknown>>;
-  } catch {
-    return undefined;
-  }
+  return /^[0-9A-HJKMNP-TV-Z]{26}$/.test(value.requestId) ? value.requestId : undefined;
 }
 
 export function wireError(error: unknown): WireError {
-  if (error instanceof ProtocolError) {
-    return {
-      code: error.code,
-      message: error.message.slice(0, 4096),
-      ...(error.details ? { details: error.details } : {}),
-    };
-  }
-  if (isWattBoundaryError(error)) {
-    const details = safeDetails(error.details);
-    return {
-      code: error.code.slice(0, 128),
-      message: error.message.slice(0, 4096),
-      ...(details ? { details } : {}),
-    };
-  }
-  return { code: "internal_error", message: "internal sidecar error" };
+  return toWireError(error, "internal sidecar error");
 }
 
 async function* messages(input: Readable): AsyncGenerator<unknown> {
   const decoder = new FrameDecoder();
   for await (const chunk of input) {
-    const bytes =
-      typeof chunk === "string"
-        ? Buffer.from(chunk, "utf8")
-        : (chunk as Buffer);
+    const bytes = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : (chunk as Buffer);
     for (const value of decoder.push(bytes)) yield value;
   }
   decoder.finish();
@@ -138,13 +97,9 @@ export class SidecarServer {
     try {
       const first = await iterator.next();
       if (first.done) {
-        throw new ProtocolError(
-          "connection closed before hello",
-          "handshake_required",
-          {
-            fatal: true,
-          },
-        );
+        throw new ProtocolError("connection closed before hello", "handshake_required", {
+          fatal: true,
+        });
       }
       assertHello(first.value);
       if (
@@ -194,10 +149,7 @@ export class SidecarServer {
         }
         if (this.#inFlight.has(request.requestId)) {
           await this.#sendError(
-            new ProtocolError(
-              "request ID is already active",
-              "duplicate_request_id",
-            ),
+            new ProtocolError("request ID is already active", "duplicate_request_id"),
             request.requestId,
             false,
           );
@@ -225,8 +177,7 @@ export class SidecarServer {
         return;
       }
       if (request.method === "runs.unsubscribe") {
-        const params =
-          request.params as HostMethodMap["runs.unsubscribe"]["params"];
+        const params = request.params as HostMethodMap["runs.unsubscribe"]["params"];
         const unsubscribed = await this.#unsubscribe(params.subscriptionId);
         await this.#sendResult(request.requestId, {
           subscriptionId: params.subscriptionId,
@@ -257,13 +208,11 @@ export class SidecarServer {
     const host = this.#requireHost();
     switch (request.method) {
       case "projects.register": {
-        const params =
-          request.params as HostMethodMap["projects.register"]["params"];
+        const params = request.params as HostMethodMap["projects.register"]["params"];
         return host.projects.register(params.repoRoot);
       }
       case "projects.get": {
-        const params =
-          request.params as HostMethodMap["projects.get"]["params"];
+        const params = request.params as HostMethodMap["projects.get"]["params"];
         return host.projects.get(params.id) ?? null;
       }
       case "projects.list":
@@ -277,56 +226,51 @@ export class SidecarServer {
           request.params as HostMethodMap["workspaces.create"]["params"],
         );
       case "workspaces.get": {
-        const params =
-          request.params as HostMethodMap["workspaces.get"]["params"];
+        const params = request.params as HostMethodMap["workspaces.get"]["params"];
         return host.workspaces.get(params.id) ?? null;
       }
       case "workspaces.list":
-        return host.workspaces.list(
-          request.params as HostMethodMap["workspaces.list"]["params"],
-        );
+        return host.workspaces.list(request.params as HostMethodMap["workspaces.list"]["params"]);
       case "workspaces.archive":
         return host.workspaces.archive(
           request.params as HostMethodMap["workspaces.archive"]["params"],
         );
       case "sessions.create":
-        return host.sessions.create(
-          request.params as HostMethodMap["sessions.create"]["params"],
-        );
+        return host.sessions.create(request.params as HostMethodMap["sessions.create"]["params"]);
       case "sessions.get": {
-        const params =
-          request.params as HostMethodMap["sessions.get"]["params"];
+        const params = request.params as HostMethodMap["sessions.get"]["params"];
         return host.sessions.get(params.id) ?? null;
       }
       case "sessions.list":
-        return host.sessions.list(
-          request.params as HostMethodMap["sessions.list"]["params"],
-        );
+        return host.sessions.list(request.params as HostMethodMap["sessions.list"]["params"]);
       case "sessions.send":
-        return host.sessions.send(
-          request.params as HostMethodMap["sessions.send"]["params"],
-        );
+        return host.sessions.send(request.params as HostMethodMap["sessions.send"]["params"]);
       case "runs.get": {
         const params = request.params as HostMethodMap["runs.get"]["params"];
         return host.runs.get(params.id) ?? null;
       }
       case "runs.list":
-        return host.runs.list(
-          request.params as HostMethodMap["runs.list"]["params"],
-        );
+        return host.runs.list(request.params as HostMethodMap["runs.list"]["params"]);
       case "runs.wait":
-        return host.runs.wait(
-          request.params as HostMethodMap["runs.wait"]["params"],
-        );
+        return host.runs.wait(request.params as HostMethodMap["runs.wait"]["params"]);
       case "runs.cancel":
-        return host.runs.cancel(
-          request.params as HostMethodMap["runs.cancel"]["params"],
+        return host.runs.cancel(request.params as HostMethodMap["runs.cancel"]["params"]);
+      case "cloud.prepareBase":
+        return host.cloud.prepareBase(
+          request.params as HostMethodMap["cloud.prepareBase"]["params"],
         );
+      case "changesets.pull":
+        return host.changesets.pull(request.params as HostMethodMap["changesets.pull"]["params"]);
+      case "changesets.resolve":
+        return host.changesets.resolve(
+          request.params as HostMethodMap["changesets.resolve"]["params"],
+        );
+      case "changesets.abort":
+        return host.changesets.abort(request.params as HostMethodMap["changesets.abort"]["params"]);
       case "host.capabilities":
         return host.capabilities();
       case "diagnostics.operations.get": {
-        const params =
-          request.params as HostMethodMap["diagnostics.operations.get"]["params"];
+        const params = request.params as HostMethodMap["diagnostics.operations.get"]["params"];
         return host.diagnostics.operations.get(params) ?? null;
       }
       case "diagnostics.operations.list":
@@ -340,10 +284,7 @@ export class SidecarServer {
         throw new ProtocolError("method routed incorrectly", "internal_error");
       default: {
         const exhaustive: never = request.method;
-        throw new ProtocolError(
-          `unsupported method: ${String(exhaustive)}`,
-          "method_not_found",
-        );
+        throw new ProtocolError(`unsupported method: ${String(exhaustive)}`, "method_not_found");
       }
     }
   }
@@ -351,16 +292,10 @@ export class SidecarServer {
   async #attach(request: RequestEnvelope<"runs.attach">): Promise<void> {
     const params = request.params;
     if (this.#subscriptions.has(params.subscriptionId)) {
-      throw new ProtocolError(
-        "subscription ID is already active",
-        "duplicate_subscription_id",
-      );
+      throw new ProtocolError("subscription ID is already active", "duplicate_subscription_id");
     }
     if (this.#subscriptions.size >= MAX_ACTIVE_SUBSCRIPTIONS) {
-      throw new ProtocolError(
-        "too many active subscriptions",
-        "subscription_limit",
-      );
+      throw new ProtocolError("too many active subscriptions", "subscription_limit");
     }
     const controller = new AbortController();
     const events = this.#requireHost().runs.attach({
@@ -416,27 +351,16 @@ export class SidecarServer {
         });
       }
       if (subscription.reason) {
-        await this.#endSubscription(
-          subscriptionId,
-          subscription,
-          subscription.reason,
-        );
+        await this.#endSubscription(subscriptionId, subscription, subscription.reason);
       } else {
         const result = await host.runs.wait({ runId: subscription.runId });
-        await this.#endSubscription(
-          subscriptionId,
-          subscription,
-          result.status,
-          result,
-        );
+        await this.#endSubscription(subscriptionId, subscription, result.status, result);
       }
     } catch (error) {
       if (subscription.reason) {
-        await this.#endSubscription(
-          subscriptionId,
-          subscription,
-          subscription.reason,
-        ).catch(() => undefined);
+        await this.#endSubscription(subscriptionId, subscription, subscription.reason).catch(
+          () => undefined,
+        );
         return;
       }
       await this.#endSubscription(
@@ -482,10 +406,7 @@ export class SidecarServer {
     return true;
   }
 
-  #shutdown(
-    reason: StreamEndReason,
-    disposition: "close" | "suspend" = "close",
-  ): Promise<void> {
+  #shutdown(reason: StreamEndReason, disposition: "close" | "suspend" = "close"): Promise<void> {
     if (this.#closePromise) return this.#closePromise;
     this.#closing = true;
     this.#closePromise = (async () => {
@@ -521,11 +442,7 @@ export class SidecarServer {
     });
   }
 
-  async #sendError(
-    error: unknown,
-    requestId: string | undefined,
-    fatal: boolean,
-  ): Promise<void> {
+  async #sendError(error: unknown, requestId: string | undefined, fatal: boolean): Promise<void> {
     const envelope: ErrorEnvelope = {
       type: "error",
       version: PROTOCOL_VERSION,

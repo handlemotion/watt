@@ -1,11 +1,4 @@
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  realpath,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { access } from "node:fs/promises";
@@ -38,9 +31,7 @@ async function initRepo(): Promise<{ repo: string; parent: string }> {
 const temps: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(
-    temps.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
-  );
+  await Promise.all(temps.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 describe("createGit", () => {
@@ -74,9 +65,7 @@ describe("createGit", () => {
     await access(path.join(secondPath, ".env"));
 
     const listed = await git.listWorktrees(repo);
-    expect(listed.map((row) => row.branch).sort()).toEqual(
-      ["main", "watt/one", "watt/two"].sort(),
-    );
+    expect(listed.map((row) => row.branch).sort()).toEqual(["main", "watt/one", "watt/two"].sort());
 
     await git.archiveWorktree({
       repoRoot: repo,
@@ -112,9 +101,7 @@ describe("createGit", () => {
     snapshots = 0;
     const healthy = await git.inspectRepository(repo);
     expect(snapshots).toBe(1);
-    expect(healthy.repositoryIdentity).toBe(
-      await realpath(path.join(repo, ".git")),
-    );
+    expect(healthy.repositoryIdentity).toBe(await realpath(path.join(repo, ".git")));
     expect(healthy.worktrees).toContainEqual(
       expect.objectContaining({
         path: canonicalWorktreePath,
@@ -244,10 +231,7 @@ describe("createGit", () => {
   it("rolls back the worktree when setup fails", async () => {
     const { repo, parent } = await initRepo();
     temps.push(parent);
-    await writeFile(
-      path.join(repo, "watt.json"),
-      JSON.stringify({ setup: "false" }),
-    );
+    await writeFile(path.join(repo, "watt.json"), JSON.stringify({ setup: "false" }));
     const git = createGit();
     await expect(
       git.createWorktree({
@@ -306,27 +290,22 @@ describe("createGit", () => {
     ["setup strings cannot be empty", { setup: "   " }],
     ["setup arrays cannot contain non-strings", { setup: ["echo ok", false] }],
     ["unknown Watt keys are rejected", { copy: [".env"], extra: true }],
-  ])(
-    "rejects strict watt.json: %s before adding a worktree",
-    async (_label, config) => {
-      const { repo, parent } = await initRepo();
-      temps.push(parent);
-      await writeFile(path.join(repo, "watt.json"), JSON.stringify(config));
-      const git = createGit();
-      await expect(
-        git.createWorktree({
-          repoRoot: repo,
-          worktreePath: path.join(parent, "wt-invalid-config"),
-          slug: "invalid-config",
-          branch: "watt/invalid-config",
-          baseRef: "HEAD",
-        }),
-      ).rejects.toMatchObject({ code: "config_invalid" });
-      expect((await git.listWorktrees(repo)).map((row) => row.branch)).toEqual([
-        "main",
-      ]);
-    },
-  );
+  ])("rejects strict watt.json: %s before adding a worktree", async (_label, config) => {
+    const { repo, parent } = await initRepo();
+    temps.push(parent);
+    await writeFile(path.join(repo, "watt.json"), JSON.stringify(config));
+    const git = createGit();
+    await expect(
+      git.createWorktree({
+        repoRoot: repo,
+        worktreePath: path.join(parent, "wt-invalid-config"),
+        slug: "invalid-config",
+        branch: "watt/invalid-config",
+        baseRef: "HEAD",
+      }),
+    ).rejects.toMatchObject({ code: "config_invalid" });
+    expect((await git.listWorktrees(repo)).map((row) => row.branch)).toEqual(["main"]);
+  });
 
   it.each([
     [
@@ -341,40 +320,29 @@ describe("createGit", () => {
     ["escaping script paths", { "setup-worktree": "../escape.sh" }],
     ["invalid selected command type", { "setup-worktree": 1 }],
     ["empty selected command arrays", { "setup-worktree": ["echo ok", " "] }],
-  ])(
-    "rejects Cursor configuration: %s before adding a worktree",
-    async (_label, config) => {
-      const { repo, parent } = await initRepo();
-      temps.push(parent);
-      await mkdir(path.join(repo, ".cursor"));
-      await writeFile(
-        path.join(repo, ".cursor", "worktrees.json"),
-        JSON.stringify(config),
-      );
-      const git = createGit();
-      await expect(
-        git.createWorktree({
-          repoRoot: repo,
-          worktreePath: path.join(parent, "wt-cursor-invalid"),
-          slug: "cursor-invalid",
-          branch: "watt/cursor-invalid",
-          baseRef: "HEAD",
-        }),
-      ).rejects.toMatchObject({ code: "config_invalid" });
-      expect((await git.listWorktrees(repo)).map((row) => row.branch)).toEqual([
-        "main",
-      ]);
-    },
-  );
+  ])("rejects Cursor configuration: %s before adding a worktree", async (_label, config) => {
+    const { repo, parent } = await initRepo();
+    temps.push(parent);
+    await mkdir(path.join(repo, ".cursor"));
+    await writeFile(path.join(repo, ".cursor", "worktrees.json"), JSON.stringify(config));
+    const git = createGit();
+    await expect(
+      git.createWorktree({
+        repoRoot: repo,
+        worktreePath: path.join(parent, "wt-cursor-invalid"),
+        slug: "cursor-invalid",
+        branch: "watt/cursor-invalid",
+        baseRef: "HEAD",
+      }),
+    ).rejects.toMatchObject({ code: "config_invalid" });
+    expect((await git.listWorktrees(repo)).map((row) => row.branch)).toEqual(["main"]);
+  });
 
   it("allows unrelated Cursor keys and executes a selected relative script in the worktree", async () => {
     const { repo, parent } = await initRepo();
     temps.push(parent);
     await mkdir(path.join(repo, ".cursor"));
-    await writeFile(
-      path.join(repo, ".cursor", "setup.sh"),
-      "#!/bin/sh\ntouch cursor-setup-ran\n",
-    );
+    await writeFile(path.join(repo, ".cursor", "setup.sh"), "#!/bin/sh\ntouch cursor-setup-ran\n");
     await chmod(path.join(repo, ".cursor", "setup.sh"), 0o755);
     await execa("git", ["add", ".cursor/setup.sh"], { cwd: repo });
     await execa("git", ["commit", "-m", "add cursor setup"], { cwd: repo });
@@ -426,9 +394,7 @@ describe("createGit", () => {
         (worktree) => worktree.branch === "watt/journal-create",
       ),
     ).toHaveLength(1);
-    await access(
-      path.join(repo, ".git", "watt-operations", `${input.operationId}.json`),
-    );
+    await access(path.join(repo, ".git", "watt-operations", `${input.operationId}.json`));
   });
 
   it("does not delete a branch that changed after worktree removal", async () => {
@@ -463,11 +429,7 @@ describe("createGit", () => {
     await execa("git", ["commit", "-m", "change branch identity"], {
       cwd: repo,
     });
-    await execa(
-      "git",
-      ["update-ref", "refs/heads/watt/journal-archive", "HEAD"],
-      { cwd: repo },
-    );
+    await execa("git", ["update-ref", "refs/heads/watt/journal-archive", "HEAD"], { cwd: repo });
 
     await expect(
       git.advanceWorkspaceOperation({
@@ -478,11 +440,7 @@ describe("createGit", () => {
       state: "needs_attention",
       reason: "branch_changed",
     });
-    await execa(
-      "git",
-      ["show-ref", "--verify", "refs/heads/watt/journal-archive"],
-      { cwd: repo },
-    );
+    await execa("git", ["show-ref", "--verify", "refs/heads/watt/journal-archive"], { cwd: repo });
   });
 
   it("archives a missing worktree idempotently while retaining its branch", async () => {
@@ -525,11 +483,9 @@ describe("createGit", () => {
       state: "advanced",
       branchOutcome: "kept",
     });
-    await execa(
-      "git",
-      ["show-ref", "--verify", "refs/heads/watt/journal-missing-archive"],
-      { cwd: repo },
-    );
+    await execa("git", ["show-ref", "--verify", "refs/heads/watt/journal-missing-archive"], {
+      cwd: repo,
+    });
   });
 
   it("marks a crash between worktree creation and provenance advance as ambiguous", async () => {
@@ -546,9 +502,7 @@ describe("createGit", () => {
     });
     const operationId = "01H00000000000000000000003";
     const repositoryIdentity = await realpath(path.join(repo, ".git"));
-    const expectedHead = (
-      await execa("git", ["rev-parse", "HEAD"], { cwd: repo })
-    ).stdout.trim();
+    const expectedHead = (await execa("git", ["rev-parse", "HEAD"], { cwd: repo })).stdout.trim();
     const operationDirectory = path.join(repositoryIdentity, "watt-operations");
     await mkdir(operationDirectory, { recursive: true });
     await writeFile(
@@ -580,11 +534,7 @@ describe("createGit", () => {
       state: "needs_attention",
     });
     await access(worktreePath);
-    await execa(
-      "git",
-      ["show-ref", "--verify", "refs/heads/watt/crash-window"],
-      { cwd: repo },
-    );
+    await execa("git", ["show-ref", "--verify", "refs/heads/watt/crash-window"], { cwd: repo });
   });
 
   it("leaves an uncertain path untouched during archive recovery", async () => {

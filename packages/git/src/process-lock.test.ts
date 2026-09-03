@@ -17,9 +17,7 @@ const fixture = path.join(import.meta.dirname, "fixtures", "lease-child.mjs");
 const temps: string[] = [];
 const children = new Set<ChildProcess>();
 
-async function initRepo(
-  label: string,
-): Promise<{ repo: string; parent: string }> {
+async function initRepo(label: string): Promise<{ repo: string; parent: string }> {
   const parent = await mkdtemp(path.join(tmpdir(), `watt-process-${label}-`));
   temps.push(parent);
   const repo = path.join(parent, "repo");
@@ -59,10 +57,7 @@ function spawnMutation(input: {
   return child;
 }
 
-function nextMessage(
-  child: ChildProcess,
-  timeoutMs = 5_000,
-): Promise<ChildMessage> {
+function nextMessage(child: ChildProcess, timeoutMs = 5_000): Promise<ChildMessage> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
@@ -101,9 +96,7 @@ afterEach(async () => {
   for (const child of children) child.kill("SIGKILL");
   children.clear();
   await Promise.all(
-    temps
-      .splice(0)
-      .map((directory) => rm(directory, { recursive: true, force: true })),
+    temps.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -111,11 +104,7 @@ describe("cross-process repository lease", () => {
   it("serializes the same repository and linked-worktree identities", async () => {
     const { repo, parent } = await initRepo("same");
     const linked = path.join(parent, "linked-source");
-    await execa(
-      "git",
-      ["worktree", "add", "-b", "source/linked", linked, "HEAD"],
-      { cwd: repo },
-    );
+    await execa("git", ["worktree", "add", "-b", "source/linked", linked, "HEAD"], { cwd: repo });
     const first = spawnMutation({ repoRoot: repo, parent, slug: "first" });
     expect(await nextMessage(first)).toMatchObject({ type: "entered" });
     const second = spawnMutation({
@@ -143,9 +132,7 @@ describe("cross-process repository lease", () => {
       repoRoot: secondRepo.repo,
       slug: "two",
     });
-    await expect(
-      Promise.all([nextMessage(first), nextMessage(second)]),
-    ).resolves.toEqual(
+    await expect(Promise.all([nextMessage(first), nextMessage(second)])).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: "entered", slug: "one" }),
         expect.objectContaining({ type: "entered", slug: "two" }),

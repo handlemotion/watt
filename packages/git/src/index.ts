@@ -2,7 +2,11 @@ export { createGit } from "./create-git.js";
 export { GitError, isGitError } from "./errors.js";
 export { isPathInside } from "./paths.js";
 export type {
+  CloudSeedInput,
+  CloudSeedResult,
   ArchiveWorktreeInput,
+  ChangesetIntegrationInput,
+  ChangesetPreflightResult,
   CreateGitOptions,
   CreateWorktreeInput,
   CreatedWorktree,

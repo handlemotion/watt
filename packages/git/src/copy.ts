@@ -44,10 +44,7 @@ export async function copyGlobs(
     const from = path.join(realRoot, relative);
     const to = path.join(realWorktree, relative);
     const realFrom = await realpath(from);
-    if (
-      !isPathInside(realRoot, realFrom) ||
-      !isPathInside(realWorktree, path.dirname(to))
-    ) {
+    if (!isPathInside(realRoot, realFrom) || !isPathInside(realWorktree, path.dirname(to))) {
       throw new GitError(`copy path escapes repo: ${relative}`, "path_escape");
     }
     const info = await stat(realFrom);

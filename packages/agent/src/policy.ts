@@ -17,10 +17,8 @@ export const DEFAULT_EXECUTION_POLICY: ExecutionPolicy = {
 function uniqueStrings(values: string[], field: string): string[] {
   const seen = new Set<string>();
   for (const value of values) {
-    if (value.length === 0)
-      throw new TypeError(`${field} contains an empty value`);
-    if (seen.has(value))
-      throw new TypeError(`${field} contains duplicate value: ${value}`);
+    if (value.length === 0) throw new TypeError(`${field} contains an empty value`);
+    if (seen.has(value)) throw new TypeError(`${field} contains duplicate value: ${value}`);
     seen.add(value);
   }
   return [...values];
@@ -48,10 +46,7 @@ export function normalizeExecutionPolicy(
         : input.toolAllowlist === null
           ? null
           : uniqueStrings(input.toolAllowlist, "toolAllowlist"),
-    toolDenylist: uniqueStrings(
-      input.toolDenylist ?? base.toolDenylist,
-      "toolDenylist",
-    ),
+    toolDenylist: uniqueStrings(input.toolDenylist ?? base.toolDenylist, "toolDenylist"),
     settingSources: settingSources(input.settingSources ?? base.settingSources),
   };
 }
