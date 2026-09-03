@@ -41,6 +41,7 @@ const child = spawn(
       ...process.env,
       WATT_DAEMON_TARBALL_URL: `http://127.0.0.1:${address.port}/${tarball}`,
       WATT_DAEMON_TARBALL_SHA256: expectedSha,
+      WATT_DAEMON_CONFIG_VERSION: "smoke-config-version",
       CLOUD_DAEMON_TOKEN: authToken,
       PORT: String(port),
       CURSOR_API_KEY: process.env.CURSOR_API_KEY ?? "smoke-placeholder",
