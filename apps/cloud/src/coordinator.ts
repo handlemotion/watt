@@ -420,6 +420,8 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
       await upstash.bootstrap(boxId!, {
         daemonToken: this.env.CLOUD_DAEMON_TOKEN,
         cursorApiKey: this.env.CURSOR_API_KEY,
+        daemonTarballUrl: this.env.CLOUD_DAEMON_TARBALL_URL,
+        daemonTarballSha256: this.env.CLOUD_DAEMON_TARBALL_SHA256,
       });
       const ingress = await this.refreshIngress(ownerId, boxId!, port);
       await this.waitForHealth(ingress);

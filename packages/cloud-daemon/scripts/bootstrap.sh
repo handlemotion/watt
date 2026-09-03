@@ -55,7 +55,29 @@ if [ ! -f "$supervisor" ]; then
   exit 1
 fi
 
-if ! pgrep -f "${CURRENT_LINK}/dist/supervisor.js" >/dev/null 2>&1; then
+running=0
+stale_pids=""
+for pid in $(pgrep -f -- "${CURRENT_LINK}/dist/supervisor.js" || true); do
+  cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)"
+  if [ "$cwd" = "$RUNTIME_DIR" ]; then
+    running=1
+  else
+    stale_pids="${stale_pids} ${pid}"
+    kill "$pid" 2>/dev/null || true
+  fi
+done
+if [ -n "$stale_pids" ]; then
+  for _ in $(seq 1 50); do
+    alive=0
+    for pid in $stale_pids; do
+      if kill -0 "$pid" 2>/dev/null; then alive=1; fi
+    done
+    [ "$alive" -eq 0 ] && break
+    sleep 0.1
+  done
+  for pid in $stale_pids; do kill -KILL "$pid" 2>/dev/null || true; done
+fi
+if [ "$running" -eq 0 ]; then
   (
     cd "$CURRENT_LINK"
     nohup env \

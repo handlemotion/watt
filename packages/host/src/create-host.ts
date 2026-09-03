@@ -57,6 +57,11 @@ function now(): number {
 }
 
 const DEFAULT_LEASE_TIMEOUT_MS = 5_000;
+const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
+
+function withIdempotencySuffix(key: string, suffix: string): string {
+  return `${key.slice(0, MAX_IDEMPOTENCY_KEY_LENGTH - suffix.length)}${suffix}`;
+}
 
 function toHostAgentError(error: unknown): never {
   if (
@@ -1510,7 +1515,9 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
             mode: "agent",
             prompt:
               "Resolve the in-progress Git merge conflicts. Preserve both intended changes, run the relevant checks, stage all resolved files, and complete the merge commit.",
-            idempotencyKey: input.idempotencyKey ? `${input.idempotencyKey}:resolver` : undefined,
+            idempotencyKey: input.idempotencyKey
+              ? withIdempotencySuffix(input.idempotencyKey, ":resolver")
+              : undefined,
           });
           result = { state: "resolving", head: resolved.head, resolver };
         }

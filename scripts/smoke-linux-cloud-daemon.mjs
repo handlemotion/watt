@@ -5,8 +5,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import Database from "better-sqlite3";
-
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageInfo = JSON.parse(
   readFileSync(path.join(root, "packages/cloud-daemon/package.json"), "utf8"),
@@ -57,11 +55,11 @@ if (exitCode !== 0) {
   throw new Error(`bootstrap smoke failed with exit code ${exitCode ?? "unknown"}`);
 }
 
+// The packaged daemon's health request initializes Host and discovers its capabilities,
+// exercising the runtime dependencies from the deployed artifact.
 const health = await fetch(`http://127.0.0.1:${port}/health`, {
   headers: { "x-watt-daemon-token": authToken },
 });
 if (!health.ok) throw new Error(`health check failed: ${health.status}`);
 
-await import("@cursor/sdk");
-new Database(":memory:");
 process.stdout.write(`${JSON.stringify({ ok: true })}\n`);

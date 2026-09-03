@@ -43,7 +43,29 @@ const BOOTSTRAP_INLINE = [
   "install -d -o root -g root /run/watt",
   'supervisor="${CURRENT_LINK}/dist/supervisor.js"',
   'if [ ! -f "$supervisor" ]; then echo bootstrap_layout_invalid >&2; exit 1; fi',
-  'if ! pgrep -f "${CURRENT_LINK}/dist/supervisor.js" >/dev/null 2>&1; then',
+  "running=0",
+  'stale_pids=""',
+  'for pid in $(pgrep -f -- "${CURRENT_LINK}/dist/supervisor.js" || true); do',
+  '  cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)"',
+  '  if [ "$cwd" = "$RUNTIME_DIR" ]; then',
+  "    running=1",
+  "  else",
+  '    stale_pids="${stale_pids} ${pid}"',
+  '    kill "$pid" 2>/dev/null || true',
+  "  fi",
+  "done",
+  'if [ -n "$stale_pids" ]; then',
+  "  for _ in $(seq 1 50); do",
+  "    alive=0",
+  "    for pid in $stale_pids; do",
+  '      if kill -0 "$pid" 2>/dev/null; then alive=1; fi',
+  "    done",
+  '    [ "$alive" -eq 0 ] && break',
+  "    sleep 0.1",
+  "  done",
+  '  for pid in $stale_pids; do kill -KILL "$pid" 2>/dev/null || true; done',
+  "fi",
+  'if [ "$running" -eq 0 ]; then',
   '  (cd "$CURRENT_LINK" && nohup env CLOUD_DAEMON_TOKEN="$CLOUD_DAEMON_TOKEN" CURSOR_API_KEY="${CURSOR_API_KEY:-}" PORT="$PORT" WATT_STATE_DIR=/var/lib/watt/state WATT_WORKTREE_ROOT=/var/lib/watt/worktrees WATT_REPOSITORY_ROOT=/var/lib/watt/repositories node "$supervisor" >/var/log/watt-supervisor.log 2>&1 &)',
   "fi",
   "for _ in $(seq 1 60); do",
@@ -130,13 +152,20 @@ export class UpstashBoxClient {
 
   async bootstrap(
     boxId: string,
-    credentials: { daemonToken: string; cursorApiKey: string },
+    credentials: {
+      daemonToken: string;
+      cursorApiKey: string;
+      daemonTarballUrl: string;
+      daemonTarballSha256: string;
+    },
   ): Promise<void> {
     const box = await this.#box(boxId);
     try {
       const environment = [
         `CLOUD_DAEMON_TOKEN=${shellQuote(credentials.daemonToken)}`,
         `CURSOR_API_KEY=${shellQuote(credentials.cursorApiKey)}`,
+        `WATT_DAEMON_TARBALL_URL=${shellQuote(credentials.daemonTarballUrl)}`,
+        `WATT_DAEMON_TARBALL_SHA256=${shellQuote(credentials.daemonTarballSha256)}`,
       ].join(" ");
       const run = await box.exec.command(
         `sudo -E env ${environment} bash -c ${shellQuote(BOOTSTRAP_SCRIPT)}`,

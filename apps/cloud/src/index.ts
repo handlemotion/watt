@@ -295,37 +295,38 @@ app.use("/v1/*", async (c, next) => {
   const authorization = c.req.header("authorization");
   if (!authorization?.startsWith("Bearer "))
     return c.json({ error: { code: "unauthorized", message: "authentication required" } }, 401);
+  await ensureNativeClient(c.env, c.var.database);
+  let userId: string | undefined;
   try {
-    await ensureNativeClient(c.env, c.var.database);
-    const userId = await verifyAccessToken(c.env, c.var.database, authorization.slice(7));
-    if (!userId)
-      return c.json({ error: { code: "unauthorized", message: "invalid access token" } }, 401);
-    const github = (
-      await c.var.database
-        .select()
-        .from(account)
-        .where(and(eq(account.userId, userId), eq(account.providerId, "github")))
-        .limit(1)
-    )[0];
-    if (!github?.accessToken || github.accountId !== c.env.ALLOWED_GITHUB_OWNER_ID)
-      return c.json(
-        {
-          error: { code: "forbidden", message: "GitHub owner is not allowed" },
-        },
-        403,
-      );
-    c.set("ownerId", github.accountId);
-    c.set("userId", userId);
-    c.set("githubToken", github.accessToken);
-    const rate = await coordinator(c.env, github.accountId).takeRateLimit("api", 120, 60_000);
-    if (!rate.allowed) {
-      c.header("retry-after", String(rate.retryAfterSeconds));
-      return c.json({ error: { code: "rate_limited", message: "too many requests" } }, 429);
-    }
-    await next();
+    userId = await verifyAccessToken(c.env, c.var.database, authorization.slice(7));
   } catch {
     return c.json({ error: { code: "unauthorized", message: "invalid access token" } }, 401);
   }
+  if (!userId)
+    return c.json({ error: { code: "unauthorized", message: "invalid access token" } }, 401);
+  const github = (
+    await c.var.database
+      .select()
+      .from(account)
+      .where(and(eq(account.userId, userId), eq(account.providerId, "github")))
+      .limit(1)
+  )[0];
+  if (!github?.accessToken || github.accountId !== c.env.ALLOWED_GITHUB_OWNER_ID)
+    return c.json(
+      {
+        error: { code: "forbidden", message: "GitHub owner is not allowed" },
+      },
+      403,
+    );
+  c.set("ownerId", github.accountId);
+  c.set("userId", userId);
+  c.set("githubToken", github.accessToken);
+  const rate = await coordinator(c.env, github.accountId).takeRateLimit("api", 120, 60_000);
+  if (!rate.allowed) {
+    c.header("retry-after", String(rate.retryAfterSeconds));
+    return c.json({ error: { code: "rate_limited", message: "too many requests" } }, 429);
+  }
+  await next();
 });
 
 app.get("/v1/cloud-host", async (c) => {

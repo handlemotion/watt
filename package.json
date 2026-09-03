@@ -23,6 +23,7 @@
     "release:check": "node scripts/check-release-version.mjs",
     "release:gate": "node scripts/release-gate.mjs",
     "test:scripts": "node --test scripts/release-version.test.mjs",
+    "version:packages": "changeset version && node scripts/sync-release-version.mjs",
     "benchmark:startup": "node scripts/benchmark-startup.mjs",
     "format": "oxfmt --config .oxfmtrc.json --write ."
   },

@@ -2073,4 +2073,49 @@ describe("createHost", () => {
     ).rejects.toMatchObject({ code: "workspace_busy" });
     await host.close();
   });
+
+  it("bounds the idempotency key used for conflict resolvers", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-resolver-key-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const git = fakeGit();
+    vi.spyOn(git.changesets, "resolve").mockResolvedValue({
+      state: "resolving",
+      head: "b".repeat(40),
+    });
+    const host = await createHost({
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git,
+      agent: fakeAgent(),
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "resolver-key",
+    });
+
+    await expect(
+      host.changesets.resolve({
+        changesetId: "changeset-12345678",
+        workspaceId: workspace.id,
+        remote: "origin",
+        branch: "watt/cloud/chat",
+        expectedLocalSha: "a".repeat(40),
+        expectedRemoteSha: "b".repeat(40),
+        remoteSha: "b".repeat(40),
+        idempotencyKey: "r".repeat(200),
+      }),
+    ).resolves.toMatchObject({ state: "resolving" });
+
+    await host.close();
+    const database = new Database(path.join(root, "state", "watt.sqlite"));
+    const replay = database
+      .prepare("SELECT idempotency_key FROM mutation_replays WHERE operation = 'sessions.create'")
+      .get() as { idempotency_key: string } | undefined;
+    expect(replay?.idempotency_key).toHaveLength(200);
+    expect(replay?.idempotency_key.endsWith(":resolver")).toBe(true);
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
 });

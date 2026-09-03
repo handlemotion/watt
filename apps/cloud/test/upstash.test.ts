@@ -60,14 +60,19 @@ describe("UpstashBoxClient", () => {
     await new UpstashBoxClient({ apiKey: "box-key" }).bootstrap("box-1", {
       daemonToken: "daemon-token",
       cursorApiKey: "cursor-key",
+      daemonTarballUrl: "https://example.com/daemon.tar.gz",
+      daemonTarballSha256: "sha256",
     });
 
     const request = fetch.mock.calls.at(-1)?.[1];
-    expect(JSON.parse(String(request?.body)).command).toEqual([
+    const command = JSON.parse(String(request?.body)).command;
+    expect(command).toEqual([
       "sh",
       "-c",
       expect.stringMatching(/^sudo -E env CLOUD_DAEMON_TOKEN=/),
     ]);
+    expect(command[2]).toContain("WATT_DAEMON_TARBALL_URL='https://example.com/daemon.tar.gz'");
+    expect(command[2]).toContain("WATT_DAEMON_TARBALL_SHA256='sha256'");
   });
 
   it("returns null for missing boxes", async () => {
