@@ -38,6 +38,40 @@ describe("WattCloudClient", () => {
     );
   });
 
+  it("keeps local cloud seed identity stable across retries", async () => {
+    const prepareBase = vi.fn(async (input: { seedId: string }) => ({
+      baseSha: "a".repeat(40),
+      baseRef: "watt/seed/local",
+      seedRef: input.seedId,
+    }));
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("transient cloud failure"))
+      .mockResolvedValueOnce(Response.json({}));
+    const client = new WattCloudClient({
+      baseUrl: "https://watt.example",
+      accessToken: () => "access",
+      fetch: fetch as typeof globalThis.fetch,
+      localCloudBase: { prepareBase },
+    });
+    const input = {
+      repositoryId: "repository-1",
+      title: "Local chat",
+      localWorkspaceId: "workspace-1",
+      prompt: "Continue",
+    };
+
+    await expect(client.chats.createFromLocal(input, "local-key-12345678")).rejects.toThrow(
+      "transient cloud failure",
+    );
+    await expect(client.chats.createFromLocal(input, "local-key-12345678")).resolves.toEqual({});
+
+    expect(prepareBase).toHaveBeenCalledTimes(2);
+    const firstSeedId = prepareBase.mock.calls[0]?.[0].seedId;
+    expect(firstSeedId).toBe(prepareBase.mock.calls[1]?.[0].seedId);
+    expect(firstSeedId).toMatch(/^seed-[0-9a-f]{32}$/);
+  });
+
   it("preserves replay-then-tail SSE ordering", async () => {
     const stream = new ReadableStream({
       start(controller) {

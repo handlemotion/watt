@@ -683,9 +683,22 @@ export function createGit(options: CreateGitOptions = {}): GitService {
     }
   }
 
+  function assertRemote(remote: string): void {
+    if (
+      !remote ||
+      remote.startsWith("-") ||
+      remote.includes("\0") ||
+      remote.includes("\r") ||
+      remote.includes("\n")
+    ) {
+      throw new GitError("invalid Git remote", "invalid_options");
+    }
+  }
+
   async function changesetPreflight(
     input: ChangesetIntegrationInput,
   ): Promise<ChangesetPreflightResult> {
+    assertRemote(input.remote);
     assertChangesetId(input.id);
     const repository = await resolveRepository(input.repoRoot);
     return locks.run(repository.repositoryIdentity, () =>
@@ -995,6 +1008,8 @@ export function createGit(options: CreateGitOptions = {}): GitService {
   }
 
   async function prepareCloudSeed(input: CloudSeedInput): Promise<CloudSeedResult> {
+    const remote = input.remote ?? "origin";
+    assertRemote(remote);
     assertChangesetId(input.id);
     const repository = await resolveRepository(input.repoRoot);
     return locks.run(repository.repositoryIdentity, () =>
@@ -1011,7 +1026,6 @@ export function createGit(options: CreateGitOptions = {}): GitService {
         if (input.expectedLocalSha && input.expectedLocalSha !== baseSha) {
           throw new GitError("local HEAD advanced", "needs_attention");
         }
-        const remote = input.remote ?? "origin";
         const refs = await git(["ls-remote", remote], worktreePath);
         if (refs.stdout.split("\n").some((line) => line.split(/\s+/, 1)[0] === baseSha)) {
           return { baseSha, baseRef: baseSha };

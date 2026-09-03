@@ -25,6 +25,7 @@
     "test:scripts": "node --test scripts/release-version.test.mjs",
     "version:packages": "changeset version && node scripts/sync-release-version.mjs",
     "benchmark:startup": "node scripts/benchmark-startup.mjs",
+    "desktop": "node scripts/run-desktop.mjs",
     "format": "oxfmt --config .oxfmtrc.json --write ."
   },
   "devDependencies": {

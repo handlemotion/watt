@@ -51,11 +51,14 @@ describe("CloudHostCoordinator", () => {
       coordinator.beginMutation("chat.create", "key-12345678", "hash-a"),
       coordinator.beginMutation("chat.create", "key-12345678", "hash-a"),
     ]);
-    expect(claims).toContainEqual({ state: "new" });
+    const newClaim = claims.find((claim) => claim.state === "new");
+    expect(newClaim).toMatchObject({ state: "new", claimId: expect.any(String) });
     expect(claims).toContainEqual({ state: "in_progress" });
+    if (newClaim?.state !== "new") throw new Error("mutation claim was not created");
     await coordinator.finishMutation(
       "chat.create",
       "key-12345678",
+      newClaim.claimId,
       JSON.stringify({ id: "chat-1" }),
     );
     await expect(
@@ -71,20 +74,32 @@ describe("CloudHostCoordinator", () => {
 
   it("allows only one owner mutation to execute at a time", async () => {
     const coordinator = env.CLOUD_HOST_COORDINATOR.getByName("owner-mutation");
-    await expect(
-      coordinator.beginMutation("chat.create", "create-12345678", "hash-a"),
-    ).resolves.toEqual({ state: "new" });
+    const claim = await coordinator.beginMutation("chat.create", "create-12345678", "hash-a");
+    expect(claim).toMatchObject({ state: "new", claimId: expect.any(String) });
+    if (claim.state !== "new") throw new Error("mutation claim was not created");
     await expect(
       coordinator.beginMutation("chat.send", "send-1234567890", "hash-b"),
     ).resolves.toEqual({ state: "in_progress" });
     await coordinator.finishMutation(
       "chat.create",
       "create-12345678",
+      claim.claimId,
       JSON.stringify({ id: "chat-1" }),
     );
     await expect(
       coordinator.beginMutation("chat.send", "send-1234567890", "hash-b"),
-    ).resolves.toEqual({ state: "new" });
+    ).resolves.toMatchObject({ state: "new", claimId: expect.any(String) });
+  });
+
+  it("releases a failed mutation claim for a retry", async () => {
+    const coordinator = env.CLOUD_HOST_COORDINATOR.getByName("owner-release");
+    const claim = await coordinator.beginMutation("chat.create", "failed-12345678", "hash-a");
+    expect(claim).toMatchObject({ state: "new", claimId: expect.any(String) });
+    if (claim.state !== "new") throw new Error("mutation claim was not created");
+    await coordinator.releaseMutation("chat.create", "failed-12345678", claim.claimId);
+    await expect(
+      coordinator.beginMutation("chat.create", "failed-12345678", "hash-a"),
+    ).resolves.toMatchObject({ state: "new", claimId: expect.any(String) });
   });
 
   it("enforces owner-local request windows", async () => {
@@ -152,6 +167,28 @@ describe("CloudHostCoordinator", () => {
         .one();
       expect(row.daemon_config_version).toBe(env.CLOUD_DAEMON_CONFIG_VERSION);
     });
+  });
+
+  it("holds an archive lease until the destructive operation releases it", async () => {
+    const coordinator = env.CLOUD_HOST_COORDINATOR.getByName("owner-archive-lease");
+
+    const lease = await coordinator.beginArchive();
+    expect(lease).toEqual({ ready: true, leaseId: expect.any(String) });
+    await expect(coordinator.beginArchive()).resolves.toEqual({ ready: false });
+    await runInDurableObject(coordinator, async (instance) => {
+      await expect(
+        instance.beginRun("owner-archive-lease", "run-archive-race", {
+          installationId: 42,
+          baseSha: "a".repeat(40),
+          branch: "watt/cloud/00000000-0000-5000-8000-000000000000",
+          repositoryUrl: "https://github.com/example/repository.git",
+        }),
+      ).rejects.toThrow("workspace_busy");
+    });
+    if (lease.ready) await coordinator.finishArchive(lease.leaseId);
+    const released = await coordinator.beginArchive();
+    expect(released).toMatchObject({ ready: true });
+    if (released.ready) await coordinator.finishArchive(released.leaseId);
   });
 
   it("preserves the replay cursor and authenticates ingress separately", async () => {

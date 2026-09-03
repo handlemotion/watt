@@ -99,6 +99,30 @@ describe("changeset integration", () => {
     ).rejects.toMatchObject({ code: "local_workspace_dirty" });
   });
 
+  it("rejects option-like remotes before invoking Git", async () => {
+    const fixture = await repository();
+    const remote = "--upload-pack=/tmp/watt-test-executable";
+
+    await expect(
+      createGit().changesets.preflight({
+        id: "changeset-remote",
+        repoRoot: fixture.root,
+        worktreePath: fixture.root,
+        remote,
+        branch: "watt/cloud/test",
+        expectedLocalSha: fixture.base,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_options" });
+    await expect(
+      createGit().cloudSeed.prepare({
+        id: "seed-remote",
+        repoRoot: fixture.root,
+        worktreePath: fixture.root,
+        remote,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_options" });
+  });
+
   it("preflights conflicts without touching the worktree and aborts resolution to the exact HEAD", async () => {
     const fixture = await repository();
     await writeFile(path.join(fixture.root, "base.txt"), "local\n");

@@ -62,9 +62,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function wireStatus(code: string): 400 | 413 | 500 {
+function wireStatus(code: string): 400 | 409 | 413 | 500 {
   if (code === "payload_too_large") return 413;
   if (code === "invalid_request") return 400;
+  if (code === "workspace_busy") return 409;
   return 500;
 }
 

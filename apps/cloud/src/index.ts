@@ -195,7 +195,12 @@ function causeCode(cause: unknown): string {
 
 function errorStatus(code: string): 400 | 409 | 413 {
   if (code === "payload_too_large") return 413;
-  if (code === "idempotency_conflict" || code === "mutation_in_progress") return 409;
+  if (
+    code === "idempotency_conflict" ||
+    code === "mutation_in_progress" ||
+    code === "workspace_busy"
+  )
+    return 409;
   return 400;
 }
 
@@ -274,21 +279,26 @@ async function idempotent<T extends JsonValue>(
   if (claim.state === "conflict") throw new Error("idempotency_conflict");
   if (claim.state === "in_progress") throw new Error("mutation_in_progress");
   if (claim.state === "replay") return JSON.parse(claim.responseJson) as T;
-  const result = await execute();
-  await db
-    .insert(idempotencyRecords)
-    .values({
-      id: crypto.randomUUID(),
-      ownerId,
-      operation,
-      idempotencyKey: key,
-      requestHash,
-      responseStatus: 200,
-      responseBody: result as object,
-    })
-    .onConflictDoNothing();
-  await stub.finishMutation(operation, key, JSON.stringify(result));
-  return result;
+  try {
+    const result = await execute();
+    await db
+      .insert(idempotencyRecords)
+      .values({
+        id: crypto.randomUUID(),
+        ownerId,
+        operation,
+        idempotencyKey: key,
+        requestHash,
+        responseStatus: 200,
+        responseBody: result as object,
+      })
+      .onConflictDoNothing();
+    await stub.finishMutation(operation, key, claim.claimId, JSON.stringify(result));
+    return result;
+  } catch (cause) {
+    await stub.releaseMutation(operation, key, claim.claimId).catch(() => undefined);
+    throw cause;
+  }
 }
 
 app.get("/health", (c) => c.json({ status: "ready", service: "watt-cloud-api" }));
@@ -565,18 +575,24 @@ app.post("/v1/chats/:chatId/archive", async (c) => {
         const archivedAt = chat.archivedAt ?? new Date();
         if (!chat.archivedAt) {
           const stub = coordinator(c.env, ownerId);
-          const token = await stub.installationToken(repository.installationId);
-          await daemonJson(stub, ownerId, "/v1/git/archive", {
-            workspaceId: chat.workspaceId,
-            branch: chat.branch,
-            repositoryUrl: `https://github.com/${repository.repositoryOwner}/${repository.name}.git`,
-            token,
-            idempotencyKey: key,
-          });
-          await db
-            .update(cloudChats)
-            .set({ archivedAt, updatedAt: archivedAt })
-            .where(and(eq(cloudChats.id, chatId), eq(cloudChats.ownerId, ownerId)));
+          const archive = await stub.beginArchive();
+          if (!archive.ready) throw new Error("workspace_busy");
+          try {
+            const token = await stub.installationToken(repository.installationId);
+            await daemonJson(stub, ownerId, "/v1/git/archive", {
+              workspaceId: chat.workspaceId,
+              branch: chat.branch,
+              repositoryUrl: `https://github.com/${repository.repositoryOwner}/${repository.name}.git`,
+              token,
+              idempotencyKey: key,
+            });
+            await db
+              .update(cloudChats)
+              .set({ archivedAt, updatedAt: archivedAt })
+              .where(and(eq(cloudChats.id, chatId), eq(cloudChats.ownerId, ownerId)));
+          } finally {
+            await stub.finishArchive(archive.leaseId);
+          }
         }
         return {
           ...chat,

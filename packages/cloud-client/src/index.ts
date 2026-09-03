@@ -130,6 +130,17 @@ export type WattCloudClientOptions = {
   localCloudBase?: LocalCloudBaseTransport;
 };
 
+async function stableSeedId(idempotencyKey: string): Promise<string> {
+  const bytes = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`watt-cloud-seed:${idempotencyKey}`),
+  );
+  const digest = [...new Uint8Array(bytes)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `seed-${digest.slice(0, 32)}`;
+}
+
 export class WattCloudClient {
   readonly #baseUrl: string;
   readonly #token: WattCloudClientOptions["accessToken"];
@@ -306,7 +317,7 @@ export class WattCloudClient {
           "creating from local HEAD requires the local Watt transport",
         );
       const base = await this.#localCloudBase.prepareBase({
-        seedId: crypto.randomUUID(),
+        seedId: await stableSeedId(idempotencyKey),
         workspaceId: input.localWorkspaceId,
         remote: input.remote,
         expectedLocalSha: input.expectedLocalSha,

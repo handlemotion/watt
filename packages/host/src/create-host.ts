@@ -182,6 +182,7 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
   const runVersions = new Map<string, number>();
   const runWaiters = new Map<string, Set<() => void>>();
   const catalogValidatedRuns = new Set<string>();
+  const mutationQueues = new Map<string, Promise<unknown>>();
   let catalogRequest: Promise<HostCapabilities> | undefined;
 
   function assertOpen(): void {
@@ -290,6 +291,23 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
   ): void {
     if (idempotencyKey === undefined) return;
     state.insertMutationReplay(operation, idempotencyKey, input, result, now());
+  }
+
+  function serializeMutation<T>(
+    operation: string,
+    idempotencyKey: string | undefined,
+    execute: () => Promise<T>,
+  ): Promise<T> {
+    if (idempotencyKey === undefined) return execute();
+    const queueKey = `${operation}\u0000${idempotencyKey}`;
+    const previous = mutationQueues.get(queueKey) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(execute);
+    mutationQueues.set(queueKey, current);
+    const cleanup = () => {
+      if (mutationQueues.get(queueKey) === current) mutationQueues.delete(queueKey);
+    };
+    void current.then(cleanup, cleanup);
+    return current;
   }
 
   async function discoverCapabilities(): Promise<HostCapabilities> {
@@ -1569,6 +1587,31 @@ export async function createHost(options: CreateHostOptions): Promise<Host> {
       },
     },
   };
+
+  const createWorkspace = host.workspaces.create;
+  host.workspaces.create = (input) =>
+    serializeMutation("workspaces.create", input.idempotencyKey, () => createWorkspace(input));
+  const archiveWorkspace = host.workspaces.archive;
+  host.workspaces.archive = (input) =>
+    serializeMutation("workspaces.archive", input.idempotencyKey, () => archiveWorkspace(input));
+  const createSession = host.sessions.create;
+  host.sessions.create = (input) =>
+    serializeMutation("sessions.create", input.idempotencyKey, () => createSession(input));
+  const sendSession = host.sessions.send;
+  host.sessions.send = (input) =>
+    serializeMutation("sessions.send", input.idempotencyKey, () => sendSession(input));
+  const prepareCloudBase = host.cloud.prepareBase;
+  host.cloud.prepareBase = (input) =>
+    serializeMutation("cloud.prepareBase", input.idempotencyKey, () => prepareCloudBase(input));
+  const pullChangeset = host.changesets.pull;
+  host.changesets.pull = (input) =>
+    serializeMutation("changesets.pull", input.idempotencyKey, () => pullChangeset(input));
+  const resolveChangeset = host.changesets.resolve;
+  host.changesets.resolve = (input) =>
+    serializeMutation("changesets.resolve", input.idempotencyKey, () => resolveChangeset(input));
+  const abortChangeset = host.changesets.abort;
+  host.changesets.abort = (input) =>
+    serializeMutation("changesets.abort", input.idempotencyKey, () => abortChangeset(input));
 
   try {
     for (const operation of state.listRecoverableOperations()) {

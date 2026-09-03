@@ -734,6 +734,51 @@ describe("createHost", () => {
     await host2.close();
   });
 
+  it("serializes concurrent idempotent session creation before agent side effects", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "watt-host-idempotency-"));
+    const repo = path.join(root, "repo");
+    await mkdir(repo);
+    const agent = fakeAgent();
+    let releaseCreate!: () => void;
+    const createGate = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const originalCreate = agent.create;
+    const create = vi.spyOn(agent, "create").mockImplementation(async (input) => {
+      await createGate;
+      return originalCreate(input);
+    });
+    const host = await createHost({
+      stateDir: path.join(root, "state"),
+      worktreeRoot: path.join(root, "trees"),
+      git: fakeGit(),
+      agent,
+    });
+    const project = await host.projects.register(repo);
+    const workspace = await host.workspaces.create({
+      projectId: project.id,
+      slug: "idempotent-session",
+    });
+    const input = {
+      workspaceId: workspace.id,
+      prompt: "same prompt",
+      idempotencyKey: "session-key-12345678",
+    };
+
+    const first = host.sessions.create(input);
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+    const second = host.sessions.create(input);
+    expect(create).toHaveBeenCalledOnce();
+
+    releaseCreate();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(secondResult).toEqual(firstResult);
+    expect(create).toHaveBeenCalledOnce();
+    expect(host.sessions.list({ workspaceId: workspace.id })).toHaveLength(1);
+    await host.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
   it("rejects path-escaping slugs and retries archive against git", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "watt-host-"));
     const repo = path.join(root, "repo");

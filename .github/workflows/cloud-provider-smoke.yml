@@ -24,7 +24,14 @@ jobs:
           node-version: 22.13.0
           cache: pnpm
 
+      - name: Validate Central Icons license
+        env:
+          CENTRAL_LICENSE_KEY: ${{ secrets.CENTRAL_LICENSE_KEY }}
+        run: ': "${CENTRAL_LICENSE_KEY:?staging environment secret CENTRAL_LICENSE_KEY is required}"'
+
       - name: Install dependencies
+        env:
+          CENTRAL_LICENSE_KEY: ${{ secrets.CENTRAL_LICENSE_KEY }}
         run: pnpm install --frozen-lockfile
 
       - name: Exercise Upstash staging

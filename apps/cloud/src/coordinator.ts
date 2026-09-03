@@ -21,11 +21,13 @@ type RunRow = {
   repository_url: string | null;
 };
 const MUTATION_LEASE_MS = 10 * 60_000;
+const ARCHIVE_LEASE_MS = 5 * 60_000;
 const IDLE_PAUSE_MS = 8 * 60_000;
 const POLL_INTERVAL_MS = 15_000;
 
 export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
   #readyRequest: Promise<{ boxId: string }> | undefined;
+  #maintenanceTail: Promise<void> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: CloudflareBindings) {
     super(ctx, env);
@@ -34,7 +36,8 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
         CREATE TABLE IF NOT EXISTS _sql_schema_migrations (id INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')));
         CREATE TABLE IF NOT EXISTS host (owner_id TEXT PRIMARY KEY, box_id TEXT, status TEXT NOT NULL, error_code TEXT, ingress_url TEXT, ingress_bearer_token TEXT, idle_deadline INTEGER, daemon_config_version TEXT);
         CREATE TABLE IF NOT EXISTS active_runs (run_id TEXT PRIMARY KEY, installation_id INTEGER NOT NULL, base_sha TEXT NOT NULL, branch TEXT NOT NULL, repository_url TEXT, created_at INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS mutations (operation TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, status TEXT NOT NULL, response_json TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (operation, idempotency_key));
+        CREATE TABLE IF NOT EXISTS archive_leases (id INTEGER PRIMARY KEY CHECK (id = 1), lease_id TEXT NOT NULL, created_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS mutations (operation TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, status TEXT NOT NULL, response_json TEXT, created_at INTEGER NOT NULL, claim_id TEXT, PRIMARY KEY (operation, idempotency_key));
         CREATE TABLE IF NOT EXISTS rate_limits (bucket TEXT PRIMARY KEY, window_start INTEGER NOT NULL, count INTEGER NOT NULL);
         INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (1);
       `);
@@ -62,8 +65,14 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
       if (!activeRunColumns.some((column) => column.name === "repository_url")) {
         this.ctx.storage.sql.exec("ALTER TABLE active_runs ADD COLUMN repository_url TEXT");
       }
+      const mutationColumns = this.ctx.storage.sql
+        .exec<{ name: string }>("PRAGMA table_info(mutations)")
+        .toArray();
+      if (!mutationColumns.some((column) => column.name === "claim_id")) {
+        this.ctx.storage.sql.exec("ALTER TABLE mutations ADD COLUMN claim_id TEXT");
+      }
       this.ctx.storage.sql.exec(
-        "INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (2), (3), (4)",
+        "INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (2), (3), (4), (5), (6)",
       );
     });
   }
@@ -102,7 +111,7 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
     idempotencyKey: string,
     requestHash: string,
   ): Promise<
-    | { state: "new" }
+    | { state: "new"; claimId: string }
     | { state: "replay"; responseJson: string }
     | { state: "in_progress" }
     | { state: "conflict" }
@@ -134,35 +143,49 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
       )
       .toArray()[0];
     if (other) return { state: "in_progress" };
+    const claimId = crypto.randomUUID();
     if (row) {
       this.ctx.storage.sql.exec(
-        "UPDATE mutations SET created_at = ? WHERE operation = ? AND idempotency_key = ?",
+        "UPDATE mutations SET created_at = ?, claim_id = ? WHERE operation = ? AND idempotency_key = ?",
         Date.now(),
+        claimId,
         operation,
         idempotencyKey,
       );
     } else {
       this.ctx.storage.sql.exec(
-        "INSERT INTO mutations (operation, idempotency_key, request_hash, status, response_json, created_at) VALUES (?, ?, ?, 'pending', NULL, ?)",
+        "INSERT INTO mutations (operation, idempotency_key, request_hash, status, response_json, created_at, claim_id) VALUES (?, ?, ?, 'pending', NULL, ?, ?)",
         operation,
         idempotencyKey,
         requestHash,
         Date.now(),
+        claimId,
       );
     }
-    return { state: "new" };
+    return { state: "new", claimId };
   }
 
   async finishMutation(
     operation: string,
     idempotencyKey: string,
+    claimId: string,
     responseJson: string,
   ): Promise<void> {
     this.ctx.storage.sql.exec(
-      "UPDATE mutations SET status = 'complete', response_json = ? WHERE operation = ? AND idempotency_key = ?",
+      "UPDATE mutations SET status = 'complete', response_json = ?, claim_id = NULL WHERE operation = ? AND idempotency_key = ? AND status = 'pending' AND claim_id = ?",
       responseJson,
       operation,
       idempotencyKey,
+      claimId,
+    );
+  }
+
+  async releaseMutation(operation: string, idempotencyKey: string, claimId: string): Promise<void> {
+    this.ctx.storage.sql.exec(
+      "DELETE FROM mutations WHERE operation = ? AND idempotency_key = ? AND status = 'pending' AND claim_id = ?",
+      operation,
+      idempotencyKey,
+      claimId,
     );
   }
 
@@ -206,6 +229,34 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
     return { status: "ready" };
   }
 
+  async beginArchive(): Promise<{ ready: true; leaseId: string } | { ready: false }> {
+    return this.maintenance(async () => {
+      if (this.activeArchiveLease()) return { ready: false };
+      await this.runAlarm();
+      if (this.activeArchiveLease()) return { ready: false };
+      const activeRuns = this.ctx.storage.sql
+        .exec<{ count: number }>("SELECT COUNT(*) AS count FROM active_runs")
+        .one().count;
+      if (activeRuns > 0) return { ready: false };
+      const leaseId = crypto.randomUUID();
+      this.ctx.storage.sql.exec(
+        "INSERT INTO archive_leases (id, lease_id, created_at) VALUES (1, ?, ?)",
+        leaseId,
+        Date.now(),
+      );
+      return { ready: true, leaseId };
+    });
+  }
+
+  async finishArchive(leaseId: string): Promise<void> {
+    await this.maintenance(async () => {
+      this.ctx.storage.sql.exec(
+        "DELETE FROM archive_leases WHERE id = 1 AND lease_id = ?",
+        leaseId,
+      );
+    });
+  }
+
   async beginRun(
     ownerId: string,
     runId: string,
@@ -216,7 +267,9 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
       repositoryUrl: string;
     },
   ): Promise<void> {
+    this.assertNoArchiveLease();
     await this.ensureReady(ownerId);
+    this.assertNoArchiveLease();
     this.ctx.storage.sql.exec(
       "INSERT OR IGNORE INTO active_runs (run_id, installation_id, base_sha, branch, repository_url, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       runId,
@@ -255,12 +308,17 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
   }
 
   async alarm(): Promise<void> {
+    await this.maintenance(() => this.runAlarm());
+  }
+
+  private async runAlarm(): Promise<void> {
     const host = this.ctx.storage.sql
       .exec<HostRow>(
         "SELECT owner_id, box_id, status, error_code, ingress_url, ingress_bearer_token, idle_deadline, daemon_config_version FROM host LIMIT 1",
       )
       .toArray()[0];
     if (!host) return;
+    if (this.activeArchiveLease()) return;
     const runs = this.ctx.storage.sql
       .exec<RunRow>(
         "SELECT run_id, installation_id, base_sha, branch, repository_url FROM active_runs ORDER BY created_at",
@@ -353,6 +411,36 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
       }
     }
     await this.updateIdlePolicy(host.owner_id);
+  }
+
+  private maintenance<T>(task: () => Promise<T>): Promise<T> {
+    const current = this.#maintenanceTail.then(task);
+    this.#maintenanceTail = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    return current;
+  }
+
+  private activeArchiveLease(): string | undefined {
+    const row = this.ctx.storage.sql
+      .exec<{ lease_id: string; created_at: number }>(
+        "SELECT lease_id, created_at FROM archive_leases WHERE id = 1",
+      )
+      .toArray()[0];
+    if (!row) return undefined;
+    if (Date.now() - row.created_at >= ARCHIVE_LEASE_MS) {
+      this.ctx.storage.sql.exec(
+        "DELETE FROM archive_leases WHERE id = 1 AND lease_id = ?",
+        row.lease_id,
+      );
+      return undefined;
+    }
+    return row.lease_id;
+  }
+
+  private assertNoArchiveLease(): void {
+    if (this.activeArchiveLease()) throw new Error("workspace_busy");
   }
 
   private host(ownerId: string): HostRow | undefined {
