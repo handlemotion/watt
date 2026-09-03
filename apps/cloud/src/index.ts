@@ -132,6 +132,51 @@ async function verifyAccessToken(
   return verified.payload.sub;
 }
 
+const GITHUB_API_ORIGIN = "https://api.github.com";
+
+function githubHeaders(token: string): HeadersInit {
+  return {
+    authorization: `Bearer ${token}`,
+    accept: "application/vnd.github+json",
+    "user-agent": "watt-cloud-api",
+  };
+}
+
+function nextGithubPage(response: Response): URL | undefined {
+  const link = response.headers.get("link");
+  if (!link) return undefined;
+  for (const value of link.split(",")) {
+    if (!/\brel\s*=\s*"next"/i.test(value)) continue;
+    const target = value.match(/<([^>]+)>/)?.[1];
+    if (!target) throw new Error("github_invalid_pagination");
+    const next = new URL(target);
+    if (next.origin !== GITHUB_API_ORIGIN) throw new Error("github_invalid_pagination");
+    return next;
+  }
+  return undefined;
+}
+
+async function githubPages<T>(
+  path: string,
+  token: string,
+  collection: string,
+): Promise<{ ok: true; items: T[] } | { ok: false }> {
+  let url = new URL(path, GITHUB_API_ORIGIN);
+  url.searchParams.set("per_page", "100");
+  const items: T[] = [];
+  for (;;) {
+    const response = await fetch(url, { headers: githubHeaders(token) });
+    if (!response.ok) return { ok: false };
+    const body = (await response.json()) as Record<string, unknown>;
+    const page = body[collection];
+    if (!Array.isArray(page)) throw new Error("github_invalid_response");
+    items.push(...(page as T[]));
+    const next = nextGithubPage(response);
+    if (!next) return { ok: true, items };
+    url = next;
+  }
+}
+
 function error(
   code: string,
   message: string,
@@ -382,41 +427,23 @@ app.get("/v1/repositories", async (c) =>
   ),
 );
 app.get("/v1/repositories/discover", async (c) => {
-  const installations = await fetch("https://api.github.com/user/installations?per_page=100", {
-    headers: {
-      authorization: `Bearer ${c.var.githubToken}`,
-      accept: "application/vnd.github+json",
-      "user-agent": "watt-cloud-api",
-    },
-  });
+  const installations = await githubPages<{
+    id: number;
+    account: { id: number; login: string };
+  }>("/user/installations", c.var.githubToken, "installations");
   if (!installations.ok)
     return error("git_auth_required", "GitHub installation authorization is required", 403);
-  const body = await installations.json<{
-    installations: Array<{
-      id: number;
-      account: { id: number; login: string };
-    }>;
-  }>();
-  const allowed = body.installations.filter((item) => String(item.account.id) === c.var.ownerId);
+  const allowed = installations.items.filter((item) => String(item.account.id) === c.var.ownerId);
   const found: unknown[] = [];
   for (const installation of allowed) {
-    const response = await fetch(
-      `https://api.github.com/user/installations/${installation.id}/repositories?per_page=100`,
-      {
-        headers: {
-          authorization: `Bearer ${c.var.githubToken}`,
-          accept: "application/vnd.github+json",
-          "user-agent": "watt-cloud-api",
-        },
-      },
+    const repositories = await githubPages<Record<string, unknown>>(
+      `/user/installations/${installation.id}/repositories`,
+      c.var.githubToken,
+      "repositories",
     );
-    if (response.ok)
+    if (repositories.ok)
       found.push(
-        ...(
-          await response.json<{
-            repositories: Array<Record<string, unknown>>;
-          }>()
-        ).repositories.map((repository) => ({
+        ...repositories.items.map((repository) => ({
           ...repository,
           installationId: installation.id,
         })),
@@ -431,28 +458,17 @@ app.post("/v1/repositories", async (c) => {
       installationId: z.number().int().positive(),
     })
     .parse(await readBoundedJson(c.req.raw, 256 * 1024));
-  const response = await fetch(
-    `https://api.github.com/user/installations/${body.installationId}/repositories?per_page=100`,
-    {
-      headers: {
-        authorization: `Bearer ${c.var.githubToken}`,
-        accept: "application/vnd.github+json",
-        "user-agent": "watt-cloud-api",
-      },
-    },
-  );
-  if (!response.ok)
+  const githubRepositories = await githubPages<{
+    id: number;
+    name: string;
+    default_branch: string;
+    owner: { id: number; login: string };
+  }>(`/user/installations/${body.installationId}/repositories`, c.var.githubToken, "repositories");
+  if (!githubRepositories.ok)
     return error("git_auth_required", "GitHub installation authorization is required", 403);
-  const discovered = (
-    await response.json<{
-      repositories: Array<{
-        id: number;
-        name: string;
-        default_branch: string;
-        owner: { id: number; login: string };
-      }>;
-    }>()
-  ).repositories.find((repository) => repository.id === body.githubRepositoryId);
+  const discovered = githubRepositories.items.find(
+    (repository) => repository.id === body.githubRepositoryId,
+  );
   if (!discovered || String(discovered.owner.id) !== c.var.ownerId)
     return error("repository_not_found", "repository is not available to the allowed owner", 404);
   const db = c.var.database;

@@ -62,6 +62,7 @@ describe("UpstashBoxClient", () => {
       cursorApiKey: "cursor-key",
       daemonTarballUrl: "https://example.com/daemon.tar.gz",
       daemonTarballSha256: "sha256",
+      daemonConfigVersion: "config-version",
     });
 
     const request = fetch.mock.calls.at(-1)?.[1];
@@ -73,6 +74,7 @@ describe("UpstashBoxClient", () => {
     ]);
     expect(command[2]).toContain("WATT_DAEMON_TARBALL_URL='https://example.com/daemon.tar.gz'");
     expect(command[2]).toContain("WATT_DAEMON_TARBALL_SHA256='sha256'");
+    expect(command[2]).toContain("WATT_DAEMON_CONFIG_VERSION='config-version'");
   });
 
   it("returns null for missing boxes", async () => {

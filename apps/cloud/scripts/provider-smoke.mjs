@@ -1,6 +1,7 @@
 const required = [
   "WATT_CLOUD_API_URL",
   "WATT_CLOUD_ACCESS_TOKEN",
+  "WATT_CLOUD_REFRESH_TOKEN",
   "WATT_GITHUB_REPOSITORY_ID",
   "WATT_GITHUB_INSTALLATION_ID",
   "WATT_SMOKE_BASE_SHA",
@@ -10,23 +11,73 @@ for (const name of required) {
 }
 
 const baseUrl = process.env.WATT_CLOUD_API_URL.replace(/\/$/, "");
-const accessToken = process.env.WATT_CLOUD_ACCESS_TOKEN;
-const headers = {
-  authorization: `Bearer ${accessToken}`,
-  accept: "application/json",
-  "content-type": "application/json",
-};
+let accessToken = process.env.WATT_CLOUD_ACCESS_TOKEN;
+let refreshToken = process.env.WATT_CLOUD_REFRESH_TOKEN;
+let accessTokenExpiresAt = 0;
+
+async function refreshAccessToken() {
+  const response = await fetch(`${baseUrl}/api/auth/oauth2/token`, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: "watt-desktop",
+      refresh_token: refreshToken,
+      resource: `${baseUrl}/v1`,
+    }),
+  });
+  const value = await response.json().catch(() => undefined);
+  if (
+    !response.ok ||
+    !value ||
+    typeof value.access_token !== "string" ||
+    typeof value.refresh_token !== "string"
+  ) {
+    throw new Error(`OAuth refresh failed: ${response.status} ${JSON.stringify(value)}`);
+  }
+  accessToken = value.access_token;
+  refreshToken = value.refresh_token;
+  const expiresIn =
+    typeof value.expires_in === "number" && Number.isFinite(value.expires_in)
+      ? value.expires_in
+      : 900;
+  accessTokenExpiresAt = Date.now() + Math.max(60, expiresIn - 60) * 1000;
+}
+
+async function ensureAccessToken() {
+  if (Date.now() < accessTokenExpiresAt) return;
+  await refreshAccessToken();
+}
+
+async function authorizedFetch(path, init = {}) {
+  await ensureAccessToken();
+  const send = () => {
+    const headers = new Headers(init.headers);
+    headers.set("authorization", `Bearer ${accessToken}`);
+    return fetch(`${baseUrl}${path}`, { ...init, headers });
+  };
+  let response = await send();
+  if (response.status === 401) {
+    await refreshAccessToken();
+    response = await send();
+  }
+  return response;
+}
 
 async function request(method, path, body, idempotencyKey) {
   const requestOptions = {
     method,
     headers: {
-      ...headers,
+      accept: "application/json",
+      "content-type": "application/json",
       ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
     },
   };
   if (body !== undefined) requestOptions.body = JSON.stringify(body);
-  const response = await fetch(`${baseUrl}${path}`, requestOptions);
+  const response = await authorizedFetch(path, requestOptions);
   const value = await response.json();
   if (!response.ok) {
     throw new Error(`${method} ${path}: ${response.status} ${JSON.stringify(value)}`);
@@ -65,9 +116,8 @@ const created = await request(
 const runId = created.run.run.id;
 
 const disconnected = new AbortController();
-const firstStream = fetch(`${baseUrl}/v1/runs/${runId}/events`, {
+const firstStream = authorizedFetch(`/v1/runs/${runId}/events`, {
   headers: {
-    authorization: `Bearer ${accessToken}`,
     accept: "text/event-stream",
   },
   signal: disconnected.signal,
@@ -97,9 +147,8 @@ if (stopped.status !== "stopped") {
 }
 await request("POST", "/v1/cloud-host/wake");
 
-const replay = await fetch(`${baseUrl}/v1/runs/${runId}/events?afterSequence=0`, {
+const replay = await authorizedFetch(`/v1/runs/${runId}/events?afterSequence=0`, {
   headers: {
-    authorization: `Bearer ${accessToken}`,
     accept: "text/event-stream",
   },
 });

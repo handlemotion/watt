@@ -16,6 +16,7 @@ if (major < 22 || (major === 22 && (minor < 13 || (minor === 13 && patch < 0))))
 
 : "${WATT_DAEMON_TARBALL_URL:?}"
 : "${WATT_DAEMON_TARBALL_SHA256:?}"
+: "${WATT_DAEMON_CONFIG_VERSION:?}"
 : "${CLOUD_DAEMON_TOKEN:?}"
 : "${PORT:=8788}"
 
@@ -35,6 +36,12 @@ if [ ! -f "$STAMP" ]; then
 fi
 
 ln -sfn "$RUNTIME_DIR" "$CURRENT_LINK"
+
+CONFIG_STAMP="/workspace/watt/.daemon-config-version"
+config_changed=1
+if [ -f "$CONFIG_STAMP" ] && [ "$(cat "$CONFIG_STAMP")" = "$WATT_DAEMON_CONFIG_VERSION" ]; then
+  config_changed=0
+fi
 
 if ! getent group watt >/dev/null 2>&1; then
   groupadd --system --gid 10001 watt
@@ -59,7 +66,7 @@ running=0
 stale_pids=""
 for pid in $(pgrep -f -- "${CURRENT_LINK}/dist/supervisor.js" || true); do
   cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)"
-  if [ "$cwd" = "$RUNTIME_DIR" ]; then
+  if [ "$cwd" = "$RUNTIME_DIR" ] && [ "$config_changed" -eq 0 ]; then
     running=1
   else
     stale_pids="${stale_pids} ${pid}"
@@ -94,6 +101,7 @@ fi
 
 for _ in $(seq 1 60); do
   if curl -fsS -H "X-Watt-Daemon-Token: ${CLOUD_DAEMON_TOKEN}" "http://127.0.0.1:${PORT}/health" >/dev/null; then
+    printf '%s\n' "$WATT_DAEMON_CONFIG_VERSION" > "$CONFIG_STAMP"
     exit 0
   fi
   sleep 1

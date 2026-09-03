@@ -11,6 +11,7 @@ type HostRow = {
   ingress_url: string | null;
   ingress_bearer_token: string | null;
   idle_deadline: number | null;
+  daemon_config_version: string | null;
 };
 type RunRow = {
   run_id: string;
@@ -31,7 +32,7 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
     ctx.blockConcurrencyWhile(async () => {
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS _sql_schema_migrations (id INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')));
-        CREATE TABLE IF NOT EXISTS host (owner_id TEXT PRIMARY KEY, box_id TEXT, status TEXT NOT NULL, error_code TEXT, ingress_url TEXT, ingress_bearer_token TEXT, idle_deadline INTEGER);
+        CREATE TABLE IF NOT EXISTS host (owner_id TEXT PRIMARY KEY, box_id TEXT, status TEXT NOT NULL, error_code TEXT, ingress_url TEXT, ingress_bearer_token TEXT, idle_deadline INTEGER, daemon_config_version TEXT);
         CREATE TABLE IF NOT EXISTS active_runs (run_id TEXT PRIMARY KEY, installation_id INTEGER NOT NULL, base_sha TEXT NOT NULL, branch TEXT NOT NULL, repository_url TEXT, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS mutations (operation TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, status TEXT NOT NULL, response_json TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (operation, idempotency_key));
         CREATE TABLE IF NOT EXISTS rate_limits (bucket TEXT PRIMARY KEY, window_start INTEGER NOT NULL, count INTEGER NOT NULL);
@@ -52,6 +53,9 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
       if (!hostColumns.some((column) => column.name === "idle_deadline")) {
         this.ctx.storage.sql.exec("ALTER TABLE host ADD COLUMN idle_deadline INTEGER");
       }
+      if (!hostColumns.some((column) => column.name === "daemon_config_version")) {
+        this.ctx.storage.sql.exec("ALTER TABLE host ADD COLUMN daemon_config_version TEXT");
+      }
       const activeRunColumns = this.ctx.storage.sql
         .exec<{ name: string }>("PRAGMA table_info(active_runs)")
         .toArray();
@@ -59,7 +63,7 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
         this.ctx.storage.sql.exec("ALTER TABLE active_runs ADD COLUMN repository_url TEXT");
       }
       this.ctx.storage.sql.exec(
-        "INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (2), (3)",
+        "INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (2), (3), (4)",
       );
     });
   }
@@ -253,7 +257,7 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
   async alarm(): Promise<void> {
     const host = this.ctx.storage.sql
       .exec<HostRow>(
-        "SELECT owner_id, box_id, status, error_code, ingress_url, ingress_bearer_token, idle_deadline FROM host LIMIT 1",
+        "SELECT owner_id, box_id, status, error_code, ingress_url, ingress_bearer_token, idle_deadline, daemon_config_version FROM host LIMIT 1",
       )
       .toArray()[0];
     if (!host) return;
@@ -354,7 +358,7 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
   private host(ownerId: string): HostRow | undefined {
     return this.ctx.storage.sql
       .exec<HostRow>(
-        "SELECT owner_id, box_id, status, error_code, ingress_url, ingress_bearer_token, idle_deadline FROM host WHERE owner_id = ?",
+        "SELECT owner_id, box_id, status, error_code, ingress_url, ingress_bearer_token, idle_deadline, daemon_config_version FROM host WHERE owner_id = ?",
         ownerId,
       )
       .toArray()[0];
@@ -370,7 +374,8 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
       current?.box_id &&
       current.status === "ready" &&
       current.ingress_url &&
-      current.ingress_bearer_token
+      current.ingress_bearer_token &&
+      current.daemon_config_version === this.env.CLOUD_DAEMON_CONFIG_VERSION
     ) {
       return Promise.resolve({ boxId: current.box_id });
     }
@@ -384,6 +389,7 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
     return {
       WATT_DAEMON_TARBALL_URL: this.env.CLOUD_DAEMON_TARBALL_URL,
       WATT_DAEMON_TARBALL_SHA256: this.env.CLOUD_DAEMON_TARBALL_SHA256,
+      WATT_DAEMON_CONFIG_VERSION: this.env.CLOUD_DAEMON_CONFIG_VERSION,
       PORT: this.env.CLOUD_DAEMON_PORT,
     };
   }
@@ -422,11 +428,13 @@ export class CloudHostCoordinator extends DurableObject<CloudflareBindings> {
         cursorApiKey: this.env.CURSOR_API_KEY,
         daemonTarballUrl: this.env.CLOUD_DAEMON_TARBALL_URL,
         daemonTarballSha256: this.env.CLOUD_DAEMON_TARBALL_SHA256,
+        daemonConfigVersion: this.env.CLOUD_DAEMON_CONFIG_VERSION,
       });
       const ingress = await this.refreshIngress(ownerId, boxId!, port);
       await this.waitForHealth(ingress);
       this.ctx.storage.sql.exec(
-        "UPDATE host SET status = 'ready', error_code = NULL WHERE owner_id = ?",
+        "UPDATE host SET status = 'ready', error_code = NULL, daemon_config_version = ? WHERE owner_id = ?",
+        this.env.CLOUD_DAEMON_CONFIG_VERSION,
         ownerId,
       );
       return { boxId: boxId! };

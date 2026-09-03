@@ -18,6 +18,7 @@ const BOOTSTRAP_INLINE = [
   'node -e \'const [major, minor, patch]=process.version.slice(1).split(".").map(Number); if (major<22||(major===22&&minor<13)) { console.error("provider_runtime_unsupported"); process.exit(1); }\'',
   ': "${WATT_DAEMON_TARBALL_URL:?}"',
   ': "${WATT_DAEMON_TARBALL_SHA256:?}"',
+  ': "${WATT_DAEMON_CONFIG_VERSION:?}"',
   ': "${CLOUD_DAEMON_TOKEN:?}"',
   ': "${PORT:=8788}"',
   'RUNTIME_ROOT="/workspace/watt/runtime"',
@@ -34,6 +35,11 @@ const BOOTSTRAP_INLINE = [
   '  touch "$STAMP"',
   "fi",
   'ln -sfn "$RUNTIME_DIR" "$CURRENT_LINK"',
+  'CONFIG_STAMP="/workspace/watt/.daemon-config-version"',
+  "config_changed=1",
+  'if [ -f "$CONFIG_STAMP" ] && [ "$(cat "$CONFIG_STAMP")" = "$WATT_DAEMON_CONFIG_VERSION" ]; then',
+  "  config_changed=0",
+  "fi",
   "if ! getent group watt >/dev/null 2>&1; then groupadd --system --gid 10001 watt; fi",
   "if ! id -u watt >/dev/null 2>&1; then useradd --system --uid 10001 --gid 10001 --home-dir /var/lib/watt --create-home watt; fi",
   "mkdir -p /var/lib/watt/state /var/lib/watt/worktrees /var/lib/watt/repositories /run/watt",
@@ -47,7 +53,7 @@ const BOOTSTRAP_INLINE = [
   'stale_pids=""',
   'for pid in $(pgrep -f -- "${CURRENT_LINK}/dist/supervisor.js" || true); do',
   '  cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)"',
-  '  if [ "$cwd" = "$RUNTIME_DIR" ]; then',
+  '  if [ "$cwd" = "$RUNTIME_DIR" ] && [ "$config_changed" -eq 0 ]; then',
   "    running=1",
   "  else",
   '    stale_pids="${stale_pids} ${pid}"',
@@ -69,7 +75,7 @@ const BOOTSTRAP_INLINE = [
   '  (cd "$CURRENT_LINK" && nohup env CLOUD_DAEMON_TOKEN="$CLOUD_DAEMON_TOKEN" CURSOR_API_KEY="${CURSOR_API_KEY:-}" PORT="$PORT" WATT_STATE_DIR=/var/lib/watt/state WATT_WORKTREE_ROOT=/var/lib/watt/worktrees WATT_REPOSITORY_ROOT=/var/lib/watt/repositories node "$supervisor" >/var/log/watt-supervisor.log 2>&1 &)',
   "fi",
   "for _ in $(seq 1 60); do",
-  '  if curl -fsS -H "X-Watt-Daemon-Token: ${CLOUD_DAEMON_TOKEN}" "http://127.0.0.1:${PORT}/health" >/dev/null; then exit 0; fi',
+  '  if curl -fsS -H "X-Watt-Daemon-Token: ${CLOUD_DAEMON_TOKEN}" "http://127.0.0.1:${PORT}/health" >/dev/null; then printf "%s\\n" "$WATT_DAEMON_CONFIG_VERSION" > "$CONFIG_STAMP"; exit 0; fi',
   "  sleep 1",
   "done",
   "echo host_start_timeout >&2",
@@ -157,6 +163,7 @@ export class UpstashBoxClient {
       cursorApiKey: string;
       daemonTarballUrl: string;
       daemonTarballSha256: string;
+      daemonConfigVersion: string;
     },
   ): Promise<void> {
     const box = await this.#box(boxId);
@@ -166,6 +173,7 @@ export class UpstashBoxClient {
         `CURSOR_API_KEY=${shellQuote(credentials.cursorApiKey)}`,
         `WATT_DAEMON_TARBALL_URL=${shellQuote(credentials.daemonTarballUrl)}`,
         `WATT_DAEMON_TARBALL_SHA256=${shellQuote(credentials.daemonTarballSha256)}`,
+        `WATT_DAEMON_CONFIG_VERSION=${shellQuote(credentials.daemonConfigVersion)}`,
       ].join(" ");
       const run = await box.exec.command(
         `sudo -E env ${environment} bash -c ${shellQuote(BOOTSTRAP_SCRIPT)}`,

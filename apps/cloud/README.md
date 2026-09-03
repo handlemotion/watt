@@ -4,7 +4,7 @@ This Hono Worker is Watt's authenticated personal-cloud control plane. It keeps 
 
 ## Provisioning
 
-Create separate PlanetScale databases and Cloudflare Hyperdrive configurations for staging and production. Replace the placeholder Hyperdrive IDs, immutable GitHub owner ID, daemon release tarball URL and SHA-256, auth URLs, and native callback in `wrangler.jsonc` for each environment.
+Create separate PlanetScale databases and Cloudflare Hyperdrive configurations for staging and production. Replace the placeholder Hyperdrive IDs, immutable GitHub owner ID, daemon release tarball URL, SHA-256, and config version, auth URLs, and native callback in `wrangler.jsonc` for each environment.
 
 Configure one GitHub App for user authorization and selected-repository installation. Its callback is `<BETTER_AUTH_URL>/api/auth/callback/github`; grant repository metadata read and contents read/write only. Configure the native OAuth callback as the fixed localhost URI in `NATIVE_REDIRECT_URI`.
 
@@ -52,7 +52,7 @@ pnpm --filter @watt/cloud-daemon package:linux
 pnpm --filter @watt/cloud-daemon smoke:linux
 ```
 
-Point `CLOUD_DAEMON_TARBALL_URL` and `CLOUD_DAEMON_TARBALL_SHA256` at the published GitHub Release asset.
+Point `CLOUD_DAEMON_TARBALL_URL` and `CLOUD_DAEMON_TARBALL_SHA256` at the published GitHub Release asset. Bump `CLOUD_DAEMON_CONFIG_VERSION` whenever the daemon token or Cursor key changes; the non-secret version forces existing boxes to re-bootstrap and restart the daemon with the new credentials.
 
 ## Rollout
 
@@ -62,11 +62,12 @@ Deploy staging first:
 pnpm --filter @watt/cloud-api deploy -- --env staging
 ```
 
-Run the opt-in provider smoke with a short-lived native access token and an exact pushed test commit. The smoke intentionally takes more than 18 minutes: it holds a run beyond the eight-minute idle policy, disconnects and reattaches, verifies publication, observes pause, wakes the box, and verifies persisted event replay.
+Run the opt-in provider smoke with a native access/refresh token pair and an exact pushed test commit. The smoke refreshes the access token as needed and intentionally takes more than 18 minutes: it holds a run beyond the eight-minute idle policy, disconnects and reattaches, verifies publication, observes pause, wakes the box, and verifies persisted event replay.
 
 ```sh
 WATT_CLOUD_API_URL=https://staging.example \
 WATT_CLOUD_ACCESS_TOKEN=... \
+WATT_CLOUD_REFRESH_TOKEN=... \
 WATT_GITHUB_REPOSITORY_ID=... \
 WATT_GITHUB_INSTALLATION_ID=... \
 WATT_SMOKE_BASE_SHA=... \

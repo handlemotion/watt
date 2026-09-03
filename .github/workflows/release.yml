@@ -291,7 +291,6 @@ jobs:
               --generate-notes \
               --title "Watt $RELEASE_TAG"
           fi
-          gh release edit "$RELEASE_TAG" --draft=false --latest
 
       - name: Clean signing material
         if: always()
@@ -316,7 +315,14 @@ jobs:
           node-version: 22.13.0
           cache: pnpm
 
+      - name: Validate Central Icons license
+        env:
+          CENTRAL_LICENSE_KEY: ${{ secrets.CENTRAL_LICENSE_KEY }}
+        run: ': "${CENTRAL_LICENSE_KEY:?repository secret CENTRAL_LICENSE_KEY is required}"'
+
       - name: Install dependencies
+        env:
+          CENTRAL_LICENSE_KEY: ${{ secrets.CENTRAL_LICENSE_KEY }}
         run: pnpm install --frozen-lockfile
 
       - name: Package Linux cloud daemon

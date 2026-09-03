@@ -120,6 +120,40 @@ describe("CloudHostCoordinator", () => {
     await coordinator.endRun("owner-alarm", "run-alarm");
   });
 
+  it("reboots a ready host when the daemon configuration generation changes", async () => {
+    const coordinator = env.CLOUD_HOST_COORDINATOR.getByName("owner-config-rotation");
+    const fetch = upstashFetch("box-config-rotation");
+    vi.stubGlobal("fetch", fetch);
+
+    await runInDurableObject(coordinator, async (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO host (owner_id, box_id, status, error_code, ingress_url, ingress_bearer_token, idle_deadline, daemon_config_version) VALUES (?, ?, 'ready', NULL, ?, ?, NULL, ?)",
+        "owner-config-rotation",
+        "box-config-rotation",
+        "https://daemon.invalid",
+        "ingress-token",
+        "old-config-version",
+      );
+    });
+
+    await expect(coordinator.wake("owner-config-rotation")).resolves.toEqual({ status: "ready" });
+    const bootstrap = fetch.mock.calls.find(([input]) =>
+      String(input).endsWith("/v2/box/box-config-rotation/exec"),
+    );
+    expect(String(bootstrap?.[1]?.body)).toContain(
+      `WATT_DAEMON_CONFIG_VERSION='${env.CLOUD_DAEMON_CONFIG_VERSION}'`,
+    );
+    await runInDurableObject(coordinator, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec<{ daemon_config_version: string }>(
+          "SELECT daemon_config_version FROM host WHERE owner_id = ?",
+          "owner-config-rotation",
+        )
+        .one();
+      expect(row.daemon_config_version).toBe(env.CLOUD_DAEMON_CONFIG_VERSION);
+    });
+  });
+
   it("preserves the replay cursor and authenticates ingress separately", async () => {
     const coordinator = env.CLOUD_HOST_COORDINATOR.getByName("owner-proxy");
     let proxiedHeaders: Headers | undefined;
