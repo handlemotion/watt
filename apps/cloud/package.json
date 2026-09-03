@@ -9,7 +9,7 @@
     "build": "wrangler deploy --dry-run --env='' --outdir dist",
     "check-types": "tsc --noEmit",
     "test": "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@127.0.0.1:5432/watt_test vitest run",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings --env-file=.dev.vars.example",
     "cf-typegen:check": "wrangler types --env-interface CloudflareBindings --check",
     "startup:check": "wrangler check startup",
     "smoke:provider": "node scripts/provider-smoke.mjs",
